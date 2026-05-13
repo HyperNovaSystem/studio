@@ -1,5 +1,5 @@
-import { defineComponent, defineEvent } from 'domecs'
-import type { ComponentType, Entity, WorldSnapshot } from 'domecs'
+import { defineComponent, defineEvent } from '@domecs/core'
+import type { ComponentType, Entity, WorldSnapshot } from '@domecs/core'
 
 export type FieldType = 'string' | 'number' | 'boolean' | 'enum' | 'entity' | 'json'
 export type EditorPanelId = 'entity-tree' | 'inspector' | 'prefabs' | 'scripts' | 'timeline' | 'viewport'

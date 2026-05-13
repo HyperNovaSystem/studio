@@ -8,7 +8,7 @@ import {
   type World,
   type WorldOptions,
   type WorldSnapshot,
-} from 'domecs'
+} from '@domecs/core'
 import {
   ApplyPrefabEvent,
   ComponentInspector,

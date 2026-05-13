@@ -1,6 +1,6 @@
-import { Has } from 'domecs'
+import { Has } from '@domecs/core'
 import { ComponentInspector, EntityTreeNode, GuestSprite, GuestTransform, InspectorField, PlaybackState, StudioRoot, TimeTravelScrubber, createDomecsStudio } from './index.js'
-import type { EntityView } from 'domecs'
+import type { EntityView } from '@domecs/core'
 import './style.css'
 
 const app = document.querySelector<HTMLDivElement>('#app')!

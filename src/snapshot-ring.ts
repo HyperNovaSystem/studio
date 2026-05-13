@@ -1,4 +1,4 @@
-import type { Entity, WorldSnapshot } from 'domecs'
+import type { Entity, WorldSnapshot } from '@domecs/core'
 
 export interface EntityDiff {
   id: Entity

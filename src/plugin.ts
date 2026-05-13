@@ -1,4 +1,4 @@
-import type { Plugin, World, WorldSnapshot } from 'domecs'
+import type { Plugin, World, WorldSnapshot } from '@domecs/core'
 import { SnapshotRingBuffer } from './snapshot-ring.js'
 
 export interface StudioPluginBridge {
