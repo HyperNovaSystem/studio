@@ -1,2 +1,25 @@
-# studio
-DOMECS Studio live-editor for DOMECS games &amp; apps
+# DOMECS Studio
+
+DOMECS exemplar #6 from `domecs/doc/exemplars.md`: a live-editing tool for DOMECS games and apps.
+
+## Spec slice
+
+- Runs **two DOMECS worlds at once**: an editor world for chrome/tool state and a hosted guest world being edited.
+- Installs as a `domecs-studio` plugin into the guest world and uses plugin lifecycle hooks:
+  - `onRender` for overlay render accounting;
+  - `onTickEnd` for time-travel capture;
+  - `onSnapshot` to redact development-only guest state.
+- Reflects guest component types through `world.componentTypes()` plus Studio field-schema metadata to generate inspector widgets.
+- Stores selection, hover, and highlight as editor-side `GuestReference` components that point at guest entity ids.
+- Maintains a bounded diff-based snapshot ring buffer for time-travel scrubbing instead of retaining one full snapshot per frame.
+- Includes entity tree, component inspector, prefab library, visual script bindings, scene save/load, play/pause/step, and guest viewport projections.
+
+## Development
+
+```sh
+npm install
+npm test
+npm run dev
+```
+
+The demo UI is intentionally vanilla DOM so the exemplar stresses DOMECS multi-world/plugin/reflection behavior rather than a framework adapter.

@@ -1,0 +1,27 @@
+:root { color-scheme: dark; font-family: Inter, ui-sans-serif, system-ui, sans-serif; background: #11131a; color: #eef2ff; }
+body { margin: 0; }
+button, input { font: inherit; }
+.studio-shell { display: grid; grid-template-columns: 280px 1fr 340px; grid-template-rows: auto 1fr 180px; gap: 10px; height: 100vh; padding: 10px; box-sizing: border-box; }
+.topbar { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; background: #191d2b; border: 1px solid #2c344c; padding: 10px 14px; border-radius: 12px; }
+.topbar span { margin-left: 12px; color: #9fa8c6; }
+.stats { color: #b8c0dc; font-size: 13px; }
+.panel { background: #171b28; border: 1px solid #2c344c; border-radius: 12px; padding: 12px; overflow: auto; box-shadow: 0 12px 30px #0004; }
+.panel h2 { margin: 0 0 10px; font-size: 14px; color: #9bdcff; text-transform: uppercase; letter-spacing: .08em; }
+.tree { grid-row: 2 / 4; }
+.viewport { grid-column: 2; }
+.inspector { grid-column: 3; grid-row: 2 / 4; }
+.timeline { grid-column: 2; }
+.tree-row { width: 100%; display: flex; justify-content: space-between; padding: 7px 8px; margin: 3px 0; color: #e6ebff; background: transparent; border: 1px solid transparent; border-radius: 8px; text-align: left; cursor: pointer; }
+.tree-row:hover, .tree-row.selected { background: #26314a; border-color: #4a7cff; }
+.tree-row small { color: #92a0c7; }
+.stage { position: relative; min-height: 360px; overflow: hidden; border-radius: 10px; background: radial-gradient(circle at 50% 30%, #263b56, #111827 70%); }
+.sprite { position: absolute; left: 50%; top: 50%; width: 24px; height: 24px; border-radius: 7px; background: var(--tint); transform: translate(var(--x), var(--y)) rotate(var(--r)); box-shadow: 0 0 18px color-mix(in srgb, var(--tint), transparent 40%); }
+.sprite.hero { border-radius: 50%; width: 30px; height: 30px; }
+.sprite.enemy { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.sprite.trigger { border: 2px dashed var(--tint); background: transparent; }
+.transport { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+.transport button { background: #4a7cff; color: white; border: 0; padding: 7px 12px; border-radius: 8px; }
+.inspector h3 { margin: 14px 0 6px; color: #ffd38d; }
+.inspector label { display: grid; grid-template-columns: 110px 1fr; gap: 8px; align-items: center; margin: 6px 0; color: #c9d2ee; }
+.inspector input { min-width: 0; background: #0f1320; color: #eef2ff; border: 1px solid #35415f; border-radius: 7px; padding: 6px; }
+.timeline input { width: 100%; }
