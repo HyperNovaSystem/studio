@@ -1,4 +1,4 @@
-import type { Plugin, World, WorldSnapshot } from '@domecs/core'
+import { ok, type Plugin, type World, type WorldSnapshot } from '@domecs/core'
 import { SnapshotRingBuffer } from './snapshot-ring.js'
 
 export interface StudioPluginBridge {
@@ -38,21 +38,21 @@ export function createDomecsStudioPlugin(bridge: StudioPluginBridge): Plugin {
     install(world: World) {
       bridge.ring.push(redactDevOnlyState(world.snapshot()))
       bridge.snapshotsCaptured += 1
-      return {
+      return ok({
         onRender() {
           bridge.overlayRenderPasses += 1
         },
-        onTickEnd(guestWorld) {
+        onTickEnd(guestWorld: World) {
           bridge.ring.push(guestWorld.snapshot())
           bridge.snapshotsCaptured += 1
         },
-        onSnapshot(snapshot) {
+        onSnapshot(snapshot: WorldSnapshot) {
           const before = JSON.stringify(snapshot)
-          const next = redactDevOnlyState(snapshot as WorldSnapshot)
+          const next = redactDevOnlyState(snapshot)
           if (JSON.stringify(next) !== before) bridge.redactedSnapshots += 1
           return next
         },
-      }
+      })
     },
   }
 }
