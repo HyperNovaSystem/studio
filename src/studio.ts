@@ -161,7 +161,7 @@ export function createDemoGuestWorld(options: { seed?: WorldOptions['seed']; hea
   }
 
   world.system('demo.guest.motion', { schedule: 'tick', query: [GuestTransform, GuestSprite] }, () => {
-    for (const { id, value: transform } of world.entitiesWith(GuestTransform)) {
+    for (const { id, value: transform } of world.iterEntitiesWith(GuestTransform)) {
       const sprite = world.getComponent(id, GuestSprite)
       if (!sprite || sprite.kind === 'hero') continue
       transform.rotation = Math.round((transform.rotation + 15 * (world.time.scaledDelta || 1 / 60)) * 1000) / 1000
@@ -287,7 +287,7 @@ function installEditorSystems(refs: StudioRefs): void {
     for (const event of events.of(SelectGuestEntityEvent)) playback.selectedGuestEntity = event.guestEntityId
     for (const event of events.of(HoverGuestEntityEvent)) playback.hoveredGuestEntity = event.guestEntityId
     editorWorld.markChanged(refs.playbackId, PlaybackState)
-    for (const { id, value } of editorWorld.entitiesWith(GuestReference)) {
+    for (const { id, value } of editorWorld.iterEntitiesWith(GuestReference)) {
       if (value.role === 'selected') value.guestEntityId = playback.selectedGuestEntity
       if (value.role === 'hovered') value.guestEntityId = playback.hoveredGuestEntity
       if (value.role === 'highlight') value.guestEntityId = playback.hoveredGuestEntity ?? playback.selectedGuestEntity
@@ -315,7 +315,7 @@ function installEditorSystems(refs: StudioRefs): void {
       const prefab = PREFABS.find((candidate) => candidate.prefabId === event.prefabId)
       if (!prefab) continue
       const id = guestWorld.spawn(prefab.create(event.x ?? 0, event.y ?? 0))
-      for (const { id: editorId, value } of editorWorld.entitiesWith(PrefabAsset)) {
+      for (const { id: editorId, value } of editorWorld.iterEntitiesWith(PrefabAsset)) {
         if (value.prefabId !== event.prefabId) continue
         value.lastInstantiatedGuestId = id
         editorWorld.markChanged(editorId, PrefabAsset)
@@ -432,7 +432,7 @@ function syncEditorProjection(refs: StudioRefs): void {
     }
   }
 
-  for (const { id, value: renderable } of guestWorld.entitiesWith(GuestRenderable)) {
+  for (const { id, value: renderable } of guestWorld.iterEntitiesWith(GuestRenderable)) {
     const sprite = guestWorld.getComponent(id, GuestSprite)
     if (!sprite?.visible) continue
     const viewportId = editorWorld.spawn([
@@ -470,7 +470,7 @@ function syncEditorProjection(refs: StudioRefs): void {
 }
 
 function rebuildVisualScriptBindings(refs: StudioRefs, selected: Entity | null): void {
-  for (const { id } of refs.editorWorld.entitiesWith(VisualScriptBinding)) refs.editorWorld.despawn(id)
+  for (const { id } of refs.editorWorld.iterEntitiesWith(VisualScriptBinding)) refs.editorWorld.despawn(id)
   if (selected === null) return
   const script = refs.guestWorld.getComponent(selected, GuestScript)
   if (!script) return

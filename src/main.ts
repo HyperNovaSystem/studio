@@ -80,4 +80,4 @@ studio.guestWorld.signals.tickEnd.subscribe(() => {
   render()
 })
 render()
-studio.editorWorld.start()
+studio.editorWorld.startLoop()

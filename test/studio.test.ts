@@ -66,7 +66,7 @@ describe('DOMECS Studio exemplar', () => {
     studio.select(selected)
     studio.hover(hovered)
 
-    const refs = Array.from(studio.editorWorld.entitiesWith(GuestReference)).map(({ value }) => value)
+    const refs = Array.from(studio.editorWorld.iterEntitiesWith(GuestReference)).map(({ value }) => value)
     expect(refs.find((ref) => ref.role === 'selected')?.guestEntityId).toBe(selected)
     expect(refs.find((ref) => ref.role === 'hovered')?.guestEntityId).toBe(hovered)
     expect(refs.find((ref) => ref.role === 'highlight')?.guestEntityId).toBe(hovered)
