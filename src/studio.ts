@@ -479,10 +479,17 @@ function syncEditorProjection(refs: StudioRefs): void {
     refs.projectionEntityIds.push(viewportId)
   }
 
+  // Rebuild script bindings before computing stats so editorEntityCount and
+  // renderedChrome reflect the fully built projection.
+  rebuildVisualScriptBindings(refs, selected)
+
   const root = editorWorld.getComponent(refs.studioId, StudioRoot)!
   const history = refs.bridge.history
   const viewCount = editorWorld.query(Has(ViewProjection)).size
-  root.editorEntityCount = editorWorld.snapshot().entities.length
+  // describe().entityCount is an O(1)-ish manifest read — no full serialization.
+  // guestEntityCount stays snapshot-derived: the guest snapshot is redacted, so
+  // the counts can legitimately differ from the live world.
+  root.editorEntityCount = editorWorld.describe().entityCount
   root.guestEntityCount = snapshot.entities.length
   root.renderedChrome = viewCount
   root.renderedGuestViews = guestWorld.query(Has(GuestRenderable)).size
@@ -501,8 +508,6 @@ function syncEditorProjection(refs: StudioRefs): void {
   const doc = editorWorld.getComponent(refs.sceneDocumentId, SceneDocument)!
   doc.guestEntityCount = snapshot.entities.length
   editorWorld.markChanged(refs.sceneDocumentId, SceneDocument)
-
-  rebuildVisualScriptBindings(refs, selected)
 }
 
 function rebuildVisualScriptBindings(refs: StudioRefs, selected: Entity | null): void {

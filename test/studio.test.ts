@@ -34,6 +34,7 @@ describe('DOMECS Studio exemplar', () => {
     const root = studio.editorWorld.getComponent(studio.studioId, StudioRoot)!
     expect(root.pluginInstalled).toBe(true)
     expect(root.editorEntityCount).toBeGreaterThanOrEqual(200)
+    expect(root.editorEntityCount).toBe(studio.editorWorld.describe().entityCount)
     expect(root.guestEntityCount).toBe(32)
     expect(studio.editorWorld.componentTypes().map((type) => type.name)).toContain('StudioRoot')
     expect(studio.guestWorld.componentTypes().map((type) => type.name)).toContain('GuestTransform')
