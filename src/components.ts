@@ -1,28 +1,10 @@
 import { defineComponent, defineEvent } from '@domecs/core'
-import type { ComponentType, Entity, WorldSnapshot } from '@domecs/core'
+import type { Entity, FieldKind, WorldSnapshot } from '@domecs/core'
 
-export type FieldType = 'string' | 'number' | 'boolean' | 'enum' | 'entity' | 'json'
 export type EditorPanelId = 'entity-tree' | 'inspector' | 'prefabs' | 'scripts' | 'timeline' | 'viewport'
 export type PlaybackMode = 'paused' | 'playing' | 'stepping'
 export type GuestRefRole = 'selected' | 'hovered' | 'highlight'
 export type ViewSlot = 'chrome' | 'tree' | 'inspector' | 'library' | 'timeline' | 'viewport' | 'overlay'
-
-export interface FieldSchema {
-  type: FieldType
-  label?: string
-  options?: readonly string[]
-  min?: number
-  max?: number
-  step?: number
-}
-
-export interface ReflectedComponentSchema<T = unknown> {
-  component: ComponentType<T>
-  name: string
-  description: string
-  transient?: boolean
-  fields: Record<string, FieldSchema>
-}
 
 function finite(name: string, value: number): true | string {
   return Number.isFinite(value) ? true : `${name} must be finite`
@@ -90,7 +72,7 @@ export const InspectorField = defineComponent<{
   guestEntityId: Entity
   componentName: string
   field: string
-  fieldType: FieldType
+  fieldType: FieldKind
   valuePreview: string
   dirty: boolean
 }>('InspectorField', {
@@ -186,6 +168,7 @@ export const ViewProjection = defineComponent<{
 
 export const GuestName = defineComponent<{ value: string }>('GuestName', {
   defaults: { value: '' },
+  schema: { fields: { value: { kind: 'string', label: 'Name' } } },
 })
 
 export const GuestTransform = defineComponent<{
@@ -195,6 +178,14 @@ export const GuestTransform = defineComponent<{
   scale: number
 }>('GuestTransform', {
   defaults: { x: 0, y: 0, rotation: 0, scale: 1 },
+  schema: {
+    fields: {
+      x: { kind: 'number', min: -500, max: 500, step: 1 },
+      y: { kind: 'number', min: -500, max: 500, step: 1 },
+      rotation: { kind: 'number', min: -360, max: 360, step: 1 },
+      scale: { kind: 'number', min: 0.1, max: 4, step: 0.1 },
+    },
+  },
 })
 
 export const GuestSprite = defineComponent<{
@@ -203,6 +194,13 @@ export const GuestSprite = defineComponent<{
   visible: boolean
 }>('GuestSprite', {
   defaults: { kind: 'prop', tint: '#8fd3ff', visible: true },
+  schema: {
+    fields: {
+      kind: { kind: 'enum', options: ['hero', 'prop', 'enemy', 'trigger'] },
+      tint: { kind: 'string' },
+      visible: { kind: 'boolean' },
+    },
+  },
 })
 
 export const GuestHealth = defineComponent<{
@@ -210,6 +208,12 @@ export const GuestHealth = defineComponent<{
   max: number
 }>('GuestHealth', {
   defaults: { hp: 10, max: 10 },
+  schema: {
+    fields: {
+      hp: { kind: 'number', min: 0, step: 1 },
+      max: { kind: 'number', min: 1, step: 1 },
+    },
+  },
 })
 
 export const GuestScript = defineComponent<{
@@ -218,6 +222,13 @@ export const GuestScript = defineComponent<{
   enabled: boolean
 }>('GuestScript', {
   defaults: { event: 'OnStart', action: 'Log', enabled: true },
+  schema: {
+    fields: {
+      event: { kind: 'string' },
+      action: { kind: 'string' },
+      enabled: { kind: 'boolean' },
+    },
+  },
 })
 
 export const GuestPrefabSource = defineComponent<{
@@ -225,6 +236,12 @@ export const GuestPrefabSource = defineComponent<{
   label: string
 }>('GuestPrefabSource', {
   defaults: { prefabId: '', label: '' },
+  schema: {
+    fields: {
+      prefabId: { kind: 'string' },
+      label: { kind: 'string' },
+    },
+  },
 })
 
 export const GuestDebugProbe = defineComponent<{
@@ -232,6 +249,12 @@ export const GuestDebugProbe = defineComponent<{
   lastEditorUser: string
 }>('GuestDebugProbe', {
   defaults: { notes: '', lastEditorUser: 'local-dev' },
+  schema: {
+    fields: {
+      notes: { kind: 'string' },
+      lastEditorUser: { kind: 'string' },
+    },
+  },
 })
 
 export const GuestRenderable = defineComponent<{
@@ -239,67 +262,13 @@ export const GuestRenderable = defineComponent<{
   layer: number
 }>('GuestRenderable', {
   defaults: { slot: 'stage', layer: 0 },
+  schema: {
+    fields: {
+      slot: { kind: 'enum', options: ['stage', 'hud'] },
+      layer: { kind: 'number', step: 1 },
+    },
+  },
 })
-
-export const guestSchemas: ReflectedComponentSchema[] = [
-  {
-    component: GuestName,
-    name: GuestName.name,
-    description: 'Human-readable entity label shown in the editor tree.',
-    fields: { value: { type: 'string', label: 'Name' } },
-  },
-  {
-    component: GuestTransform,
-    name: GuestTransform.name,
-    description: '2D transform edited by numeric inspector widgets.',
-    fields: {
-      x: { type: 'number', min: -500, max: 500, step: 1 },
-      y: { type: 'number', min: -500, max: 500, step: 1 },
-      rotation: { type: 'number', min: -360, max: 360, step: 1 },
-      scale: { type: 'number', min: 0.1, max: 4, step: 0.1 },
-    },
-  },
-  {
-    component: GuestSprite,
-    name: GuestSprite.name,
-    description: 'DOM stage projection metadata.',
-    fields: {
-      kind: { type: 'enum', options: ['hero', 'prop', 'enemy', 'trigger'] },
-      tint: { type: 'string' },
-      visible: { type: 'boolean' },
-    },
-  },
-  {
-    component: GuestHealth,
-    name: GuestHealth.name,
-    description: 'Simple gameplay data used to prove arbitrary component editing.',
-    fields: { hp: { type: 'number', min: 0, step: 1 }, max: { type: 'number', min: 1, step: 1 } },
-  },
-  {
-    component: GuestScript,
-    name: GuestScript.name,
-    description: 'Visual-script binding source stored on guest entities.',
-    fields: { event: { type: 'string' }, action: { type: 'string' }, enabled: { type: 'boolean' } },
-  },
-  {
-    component: GuestPrefabSource,
-    name: GuestPrefabSource.name,
-    description: 'Prefab identity for spawned scene assets.',
-    fields: { prefabId: { type: 'string' }, label: { type: 'string' } },
-  },
-  {
-    component: GuestDebugProbe,
-    name: GuestDebugProbe.name,
-    description: 'Development-only editor scratch data redacted by the Studio plugin.',
-    fields: { notes: { type: 'string' }, lastEditorUser: { type: 'string' } },
-  },
-  {
-    component: GuestRenderable,
-    name: GuestRenderable.name,
-    description: 'Guest viewport view projection marker.',
-    fields: { slot: { type: 'enum', options: ['stage', 'hud'] }, layer: { type: 'number', step: 1 } },
-  },
-]
 
 export const SelectGuestEntityEvent = defineEvent<{ guestEntityId: Entity | null }>('Studio.SelectGuestEntity')
 export const HoverGuestEntityEvent = defineEvent<{ guestEntityId: Entity | null }>('Studio.HoverGuestEntity')

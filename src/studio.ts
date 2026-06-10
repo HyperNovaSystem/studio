@@ -2,9 +2,11 @@ import {
   Has,
   createWorld,
   entry,
+  type ComponentDescriptor,
   type ComponentEntry,
   type ComponentType,
   type Entity,
+  type FieldKind,
   type World,
   type WorldOptions,
   type WorldSnapshot,
@@ -39,9 +41,7 @@ import {
   TimeTravelScrubber,
   ViewProjection,
   VisualScriptBinding,
-  guestSchemas,
   type EditorPanelId,
-  type ReflectedComponentSchema,
 } from './components.js'
 import { createDomecsStudioPlugin, createStudioPluginBridge, type StudioPluginBridge } from './plugin.js'
 
@@ -60,7 +60,6 @@ export interface StudioRefs {
   scrubberId: Entity
   sceneDocumentId: Entity
   bridge: StudioPluginBridge
-  schemaRegistry: Map<string, ReflectedComponentSchema<any>>
   projectionEntityIds: Entity[]
   select(guestEntityId: Entity | null): void
   hover(guestEntityId: Entity | null): void
@@ -71,7 +70,7 @@ export interface StudioRefs {
   applyPrefab(prefabId: string, x?: number, y?: number): Entity | null
   saveScene(name?: string): WorldSnapshot
   sync(): void
-  reflectedSchemas(): ReflectedComponentSchema<any>[]
+  reflectedSchemas(): ComponentDescriptor[]
   visibleTree(): ReturnType<World['query']>['entities']
   inspectorFields(): ReturnType<World['query']>['entities']
   memoryRatio(): number
@@ -176,10 +175,20 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
   const editorWorld = createWorld({ seed: options.seed ?? 106, headless: options.headless !== false })
   const guestWorld = options.guestWorld ?? createDemoGuestWorld({ seed: options.seed ?? 106, headless: true, entityCount: options.guestEntityCount })
   const bridge = createStudioPluginBridge(options.ringCapacity ?? 3600)
-  const schemaRegistry = new Map<string, ReflectedComponentSchema<any>>()
-  for (const schema of guestSchemas as ReflectedComponentSchema<any>[]) schemaRegistry.set(schema.name, schema)
 
   guestWorld.use(createDomecsStudioPlugin(bridge))
+
+  // name -> ComponentType, cached from the guest world's registry. Component
+  // types register lazily on first use, so refresh the cache on a miss (e.g.
+  // GuestPrefabSource only registers once a prefab is first instantiated).
+  const componentTypeByName = new Map<string, ComponentType<unknown>>()
+  const resolveComponentType = (name: string): ComponentType<unknown> | undefined => {
+    if (!componentTypeByName.has(name)) {
+      for (const type of guestWorld.componentTypes()) componentTypeByName.set(type.name, type)
+    }
+    return componentTypeByName.get(name)
+  }
+  resolveComponentType('GuestName')
 
   const studioId = editorWorld.spawn([
     entry(StudioRoot, {
@@ -218,7 +227,6 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
     scrubberId,
     sceneDocumentId,
     bridge,
-    schemaRegistry,
     projectionEntityIds: [],
     select(guestEntityId) {
       editorWorld.emit(SelectGuestEntityEvent, { guestEntityId })
@@ -260,7 +268,7 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
       syncEditorProjection(refs)
     },
     reflectedSchemas() {
-      return reflectGuestSchemas(guestWorld, schemaRegistry)
+      return reflectGuestSchemas(guestWorld)
     },
     visibleTree() {
       return editorWorld.query(Has(EntityTreeNode)).entities
@@ -274,12 +282,12 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
     },
   }
 
-  installEditorSystems(refs)
+  installEditorSystems(refs, resolveComponentType)
   syncEditorProjection(refs)
   return refs
 }
 
-function installEditorSystems(refs: StudioRefs): void {
+function installEditorSystems(refs: StudioRefs, resolveComponentType: (name: string) => ComponentType<unknown> | undefined): void {
   const { editorWorld, guestWorld } = refs
 
   editorWorld.system('studio.selection', { schedule: 'event', triggers: [SelectGuestEntityEvent, HoverGuestEntityEvent] }, ({ events }) => {
@@ -298,12 +306,13 @@ function installEditorSystems(refs: StudioRefs): void {
 
   editorWorld.system('studio.inspect.edit', { schedule: 'event', triggers: [EditComponentFieldEvent] }, ({ events }) => {
     for (const event of events.of(EditComponentFieldEvent)) {
-      const schema = refs.schemaRegistry.get(event.componentName)
-      if (!schema) continue
-      const type = schema.component as ComponentType<Record<string, unknown>>
+      const type = resolveComponentType(event.componentName) as ComponentType<Record<string, unknown>> | undefined
+      if (!type) continue
+      const descriptor = guestWorld.describeComponent(type)
+      if (descriptor.fieldsSource !== 'schema') continue
       const component = guestWorld.getComponent(event.guestEntityId, type)
       if (!component) continue
-      component[event.field] = coerceFieldValue(event.value, schema.fields[event.field]?.type)
+      component[event.field] = coerceFieldValue(event.value, descriptor.fields[event.field]?.kind)
       guestWorld.markChanged(event.guestEntityId, type)
       markSceneDirty(refs)
     }
@@ -406,22 +415,22 @@ function syncEditorProjection(refs: StudioRefs): void {
 
   if (selected !== null) {
     for (const type of guestWorld.archetype(selected)) {
-      const schema = refs.schemaRegistry.get(type.name)
-      if (!schema) continue
-      const component = guestWorld.getComponent(selected, schema.component as ComponentType<Record<string, unknown>>)
+      const descriptor = guestWorld.describeComponent(type)
+      if (descriptor.fieldsSource !== 'schema') continue
+      const component = guestWorld.getComponent(selected, type as ComponentType<Record<string, unknown>>)
       if (!component) continue
       const inspectorId = editorWorld.spawn([
-        entry(ComponentInspector, { guestEntityId: selected, componentName: type.name, fieldCount: Object.keys(schema.fields).length, expanded: true }),
+        entry(ComponentInspector, { guestEntityId: selected, componentName: type.name, fieldCount: Object.keys(descriptor.fields).length, expanded: true }),
         entry(ViewProjection, { slot: 'inspector', key: `component-${selected}-${type.name}`, guestEntityId: selected, visible: true, z: 0 }),
       ])
       refs.projectionEntityIds.push(inspectorId)
-      for (const [field, fieldSchema] of Object.entries(schema.fields)) {
+      for (const [field, fieldSchema] of Object.entries(descriptor.fields)) {
         const fieldId = editorWorld.spawn([
           entry(InspectorField, {
             guestEntityId: selected,
             componentName: type.name,
             field,
-            fieldType: fieldSchema.type,
+            fieldType: fieldSchema.kind,
             valuePreview: previewValue(component[field]),
             dirty: false,
           }),
@@ -448,7 +457,7 @@ function syncEditorProjection(refs: StudioRefs): void {
   root.guestEntityCount = snapshot.entities.length
   root.renderedChrome = viewCount
   root.renderedGuestViews = guestWorld.query(Has(GuestRenderable)).size
-  root.reflectedComponentTypes = reflectGuestSchemas(guestWorld, refs.schemaRegistry).length
+  root.reflectedComponentTypes = reflectGuestSchemas(guestWorld).length
   root.pluginInstalled = true
   editorWorld.markChanged(refs.studioId, StudioRoot)
 
@@ -485,11 +494,11 @@ function rebuildVisualScriptBindings(refs: StudioRefs, selected: Entity | null):
   ])
 }
 
-function reflectGuestSchemas(world: World, registry: Map<string, ReflectedComponentSchema<any>>): ReflectedComponentSchema<any>[] {
-  return world.componentTypes().flatMap((type) => {
-    const schema = registry.get(type.name)
-    return schema ? [schema] : []
-  })
+function reflectGuestSchemas(world: World): ComponentDescriptor[] {
+  return world
+    .componentTypes()
+    .map((type) => world.describeComponent(type))
+    .filter((descriptor) => descriptor.fieldsSource === 'schema')
 }
 
 function snapshotEntityIds(snapshot: WorldSnapshot): Entity[] {
@@ -502,10 +511,10 @@ function previewValue(value: unknown): string {
   return JSON.stringify(value)
 }
 
-function coerceFieldValue(value: unknown, fieldType?: string): unknown {
-  if (fieldType === 'number') return typeof value === 'number' ? value : Number(value)
-  if (fieldType === 'boolean') return value === true || value === 'true'
-  if (fieldType === 'string' || fieldType === 'enum') return String(value)
+function coerceFieldValue(value: unknown, kind?: FieldKind): unknown {
+  if (kind === 'number') return typeof value === 'number' ? value : Number(value)
+  if (kind === 'boolean') return value === true || value === 'true'
+  if (kind === 'string' || kind === 'enum') return String(value)
   return value
 }
 

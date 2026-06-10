@@ -47,7 +47,8 @@ describe('DOMECS Studio exemplar', () => {
 
     const schemas = studio.reflectedSchemas()
     expect(schemas.map((schema) => schema.name)).toContain('GuestTransform')
-    expect(schemas.find((schema) => schema.name === 'GuestTransform')?.fields.x?.type).toBe('number')
+    expect(schemas.find((schema) => schema.name === 'GuestTransform')?.fields.x?.kind).toBe('number')
+    expect(schemas.every((schema) => schema.fieldsSource === 'schema')).toBe(true)
     expect(studio.editorWorld.query(Has(ComponentInspector)).size).toBeGreaterThan(0)
     expect(studio.editorWorld.query(Has(InspectorField)).size).toBeGreaterThan(5)
 
@@ -115,6 +116,10 @@ describe('DOMECS Studio exemplar', () => {
     const studio = createDomecsStudio({ seed: 6, headless: true, guestEntityCount: 6 })
     const newId = studio.applyPrefab('enemy.spark', 77, -12)
     expect(newId).toEqual(expect.any(Number))
+
+    studio.applyPrefab('prop.crate', 10, 10)
+    expect(studio.reflectedSchemas()).toHaveLength(8)
+    expect(studio.reflectedSchemas().map((schema) => schema.name)).toContain('GuestPrefabSource')
 
     studio.select(newId)
     expect(studio.guestWorld.getComponent(newId!, GuestHealth)?.max).toBe(6)
