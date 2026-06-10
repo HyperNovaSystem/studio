@@ -121,18 +121,15 @@ export const TimeTravelScrubber = defineComponent<{
   length: number
   cursor: number
   currentTick: number
-  totalChangedComponents: number
-  compactBytes: number
-  fullSnapshotBytes: number
+  /** Entities added/removed/changed at the checkpoint last scrubbed to (engine diffSnapshots; computed on scrub only). */
+  changedEntities: number
 }>('TimeTravelScrubber', {
   defaults: {
     capacity: 3600,
     length: 0,
     cursor: 0,
     currentTick: 0,
-    totalChangedComponents: 0,
-    compactBytes: 0,
-    fullSnapshotBytes: 0,
+    changedEntities: 0,
   },
   validate: (value) => nonNegativeInteger('capacity', value.capacity),
 })

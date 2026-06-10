@@ -93,16 +93,20 @@ describe('DOMECS Studio exemplar', () => {
     expect(studio.bridge.redactedSnapshots).toBeGreaterThanOrEqual(1)
   })
 
-  it('uses a bounded diff snapshot ring for time-travel scrubbing', () => {
+  it('uses a bounded engine snapshot history for time-travel scrubbing', () => {
     const studio = createDomecsStudio({ seed: 5, headless: true, guestEntityCount: 18, ringCapacity: 8 })
     const tracked = studio.guestWorld.snapshot().entities[0]!.id
 
     for (let i = 0; i < 20; i++) studio.stepGuest(1, 1 / 60)
 
     const scrubber = studio.editorWorld.getComponent(studio.scrubberId, TimeTravelScrubber)!
+    expect(scrubber.capacity).toBe(8)
     expect(scrubber.length).toBe(8)
-    expect(scrubber.fullSnapshotBytes).toBeGreaterThan(scrubber.compactBytes)
-    expect(studio.memoryRatio()).toBeLessThan(1)
+    expect(scrubber.cursor).toBe(7)
+
+    const diffs = studio.timelineDiffs()
+    expect(diffs).toHaveLength(7)
+    expect(diffs.some((diff) => diff.changedEntities.length > 0)).toBe(true)
 
     studio.editField(tracked, 'GuestTransform', 'x', 321)
     studio.stepGuest(1, 1 / 60)
@@ -110,6 +114,13 @@ describe('DOMECS Studio exemplar', () => {
 
     studio.scrub(0)
     expect(studio.guestWorld.getComponent(tracked, GuestTransform)?.x).not.toBe(321)
+    expect(studio.editorWorld.getComponent(studio.scrubberId, TimeTravelScrubber)!.cursor).toBe(0)
+
+    // Linear undo semantics: pushing after a scrub-back truncates the redo branch.
+    studio.stepGuest(1, 1 / 60)
+    const truncated = studio.editorWorld.getComponent(studio.scrubberId, TimeTravelScrubber)!
+    expect(truncated.length).toBe(2)
+    expect(truncated.cursor).toBe(1)
   })
 
   it('supports prefab library, visual script binding, scene save, and viewport projections', () => {

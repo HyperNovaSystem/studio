@@ -11,6 +11,7 @@ import {
   type WorldOptions,
   type WorldSnapshot,
 } from '@domecs/core'
+import { createSnapshotHistory, diffSnapshots, type SnapshotDiff } from '@domecs/persist'
 import {
   ApplyPrefabEvent,
   ComponentInspector,
@@ -73,7 +74,12 @@ export interface StudioRefs {
   reflectedSchemas(): ComponentDescriptor[]
   visibleTree(): ReturnType<World['query']>['entities']
   inspectorFields(): ReturnType<World['query']>['entities']
-  memoryRatio(): number
+  /**
+   * Entity-level diffs between adjacent history checkpoints (engine
+   * `diffSnapshots`). On-demand only — `history.snapshots()` returns a
+   * defensive copy, so do not call this per frame.
+   */
+  timelineDiffs(): SnapshotDiff[]
 }
 
 interface PrefabDefinition {
@@ -174,9 +180,17 @@ export function createDemoGuestWorld(options: { seed?: WorldOptions['seed']; hea
 export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
   const editorWorld = createWorld({ seed: options.seed ?? 106, headless: options.headless !== false })
   const guestWorld = options.guestWorld ?? createDemoGuestWorld({ seed: options.seed ?? 106, headless: true, entityCount: options.guestEntityCount })
-  const bridge = createStudioPluginBridge(options.ringCapacity ?? 3600)
+  const ringCapacity = options.ringCapacity ?? 3600
+  const bridge = createStudioPluginBridge()
 
   guestWorld.use(createDomecsStudioPlugin(bridge))
+
+  // Created AFTER use(plugin) so the initial checkpoint flows through the
+  // plugin's onSnapshot redaction hook. Engine default limit is 50 — pass the
+  // app's capacity explicitly.
+  const history = createSnapshotHistory(guestWorld, { limit: ringCapacity, captureInitial: true })
+  bridge.history = history
+  bridge.snapshotsCaptured += 1
 
   // name -> ComponentType, cached from the guest world's registry. Component
   // types register lazily on first use, so refresh the cache on a miss (e.g.
@@ -203,7 +217,7 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
     }),
   ])
   const playbackId = editorWorld.spawn([entry(PlaybackState, { mode: 'paused', speed: 1, stepCount: 0, selectedGuestEntity: null, hoveredGuestEntity: null })])
-  const scrubberId = editorWorld.spawn([entry(TimeTravelScrubber, { capacity: bridge.ring.capacity, length: 0, cursor: 0, currentTick: 0, totalChangedComponents: 0, compactBytes: 0, fullSnapshotBytes: 0 })])
+  const scrubberId = editorWorld.spawn([entry(TimeTravelScrubber, { capacity: ringCapacity, length: history.length, cursor: history.index, currentTick: 0, changedEntities: 0 })])
   const sceneDocumentId = editorWorld.spawn([entry(SceneDocument, { name: 'demo.scene.json', savedAtTick: 0, serializedBytes: 0, dirty: false, guestEntityCount: 0 })])
 
   for (const [order, panel] of PANEL_ORDER.entries()) {
@@ -276,9 +290,11 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
     inspectorFields() {
       return editorWorld.query(Has(InspectorField)).entities
     },
-    memoryRatio() {
-      const stats = bridge.ring.stats()
-      return stats.fullSnapshotBytes === 0 ? 1 : stats.compactBytes / stats.fullSnapshotBytes
+    timelineDiffs() {
+      const snapshots = history.snapshots()
+      const diffs: SnapshotDiff[] = []
+      for (let i = 1; i < snapshots.length; i++) diffs.push(diffSnapshots(snapshots[i - 1]!, snapshots[i]!))
+      return diffs
     },
   }
 
@@ -366,8 +382,21 @@ function installEditorSystems(refs: StudioRefs, resolveComponentType: (name: str
       markSceneDirty(refs)
     }
     for (const event of events.of(ScrubToSnapshotEvent)) {
-      const snapshot = refs.bridge.ring.seek(event.cursor)
-      guestWorld.restore(snapshot)
+      const history = refs.bridge.history
+      if (!history || history.length === 0) continue
+      const cursor = Math.max(0, Math.min(event.cursor, history.length - 1))
+      while (history.index > cursor && history.undo()) { /* walk back */ }
+      while (history.index < cursor && history.redo()) { /* walk forward */ }
+      const scrubber = editorWorld.getComponent(refs.scrubberId, TimeTravelScrubber)!
+      const snapshots = history.snapshots()
+      const index = history.index
+      if (index > 0) {
+        const diff = diffSnapshots(snapshots[index - 1]!, snapshots[index]!)
+        scrubber.changedEntities = diff.addedEntities.length + diff.removedEntities.length + diff.changedEntities.length
+      } else {
+        scrubber.changedEntities = 0
+      }
+      editorWorld.markChanged(refs.scrubberId, TimeTravelScrubber)
       playback.mode = 'paused'
       markSceneDirty(refs)
     }
@@ -451,7 +480,7 @@ function syncEditorProjection(refs: StudioRefs): void {
   }
 
   const root = editorWorld.getComponent(refs.studioId, StudioRoot)!
-  const stats = refs.bridge.ring.stats()
+  const history = refs.bridge.history
   const viewCount = editorWorld.query(Has(ViewProjection)).size
   root.editorEntityCount = editorWorld.snapshot().entities.length
   root.guestEntityCount = snapshot.entities.length
@@ -461,14 +490,12 @@ function syncEditorProjection(refs: StudioRefs): void {
   root.pluginInstalled = true
   editorWorld.markChanged(refs.studioId, StudioRoot)
 
+  // Checkpoint count + cursor only — both O(1) reads. Changed-entity counts
+  // come from timelineDiffs()/scrub on demand, never per frame.
   const scrubber = editorWorld.getComponent(refs.scrubberId, TimeTravelScrubber)!
-  scrubber.capacity = stats.capacity
-  scrubber.length = stats.length
-  scrubber.cursor = stats.cursor
+  scrubber.length = history?.length ?? 0
+  scrubber.cursor = history?.index ?? -1
   scrubber.currentTick = snapshot.tick
-  scrubber.totalChangedComponents = stats.totalChangedComponents
-  scrubber.compactBytes = stats.compactBytes
-  scrubber.fullSnapshotBytes = stats.fullSnapshotBytes
   editorWorld.markChanged(refs.scrubberId, TimeTravelScrubber)
 
   const doc = editorWorld.getComponent(refs.sceneDocumentId, SceneDocument)!

@@ -46,7 +46,7 @@ function render(): void {
       </section>
       <section class="panel timeline">
         <h2>Time Travel</h2>
-        <p>${scrubber.length}/${scrubber.capacity} snapshots · ${scrubber.compactBytes}/${scrubber.fullSnapshotBytes} bytes</p>
+        <p>${scrubber.length}/${scrubber.capacity} snapshots · checkpoint ${scrubber.cursor + 1}/${scrubber.length}</p>
         <input type="range" min="0" max="${Math.max(0, scrubber.length - 1)}" value="${scrubber.cursor}" data-scrub>
       </section>
     </main>

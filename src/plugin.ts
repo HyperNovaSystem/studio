@@ -1,16 +1,22 @@
-import { ok, type Plugin, type World, type WorldSnapshot } from '@domecs/core'
-import { SnapshotRingBuffer } from './snapshot-ring.js'
+import { ok, type Plugin, type WorldSnapshot } from '@domecs/core'
+import type { SnapshotHistory } from '@domecs/persist'
 
 export interface StudioPluginBridge {
-  ring: SnapshotRingBuffer
+  /**
+   * Engine snapshot history over the guest world. Attached by
+   * `createDomecsStudio` AFTER the plugin is installed, so the initial
+   * checkpoint (`captureInitial`) flows through the plugin's `onSnapshot`
+   * redaction hook.
+   */
+  history: SnapshotHistory | null
   overlayRenderPasses: number
   snapshotsCaptured: number
   redactedSnapshots: number
 }
 
-export function createStudioPluginBridge(capacity = 3600): StudioPluginBridge {
+export function createStudioPluginBridge(): StudioPluginBridge {
   return {
-    ring: new SnapshotRingBuffer(capacity),
+    history: null,
     overlayRenderPasses: 0,
     snapshotsCaptured: 0,
     redactedSnapshots: 0,
@@ -35,15 +41,14 @@ export function createDomecsStudioPlugin(bridge: StudioPluginBridge): Plugin {
   return {
     name: 'domecs-studio',
     provides: ['studio-inspector'],
-    install(world: World) {
-      bridge.ring.push(redactDevOnlyState(world.snapshot()))
-      bridge.snapshotsCaptured += 1
+    install() {
       return ok({
         onRender() {
           bridge.overlayRenderPasses += 1
         },
-        onTickEnd(guestWorld: World) {
-          bridge.ring.push(guestWorld.snapshot())
+        onTickEnd() {
+          if (!bridge.history) return
+          bridge.history.push()
           bridge.snapshotsCaptured += 1
         },
         onSnapshot(snapshot: WorldSnapshot) {
