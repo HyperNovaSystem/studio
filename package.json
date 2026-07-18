@@ -18,14 +18,14 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@domecs/core": "file:../domecs/packages/domecs",
-    "@domecs/dom": "file:../domecs/packages/domecs-dom",
-    "@domecs/persist": "file:../domecs/packages/domecs-persist"
+    "@domecs/core": "^1.0.0",
+    "@domecs/dom": "^1.0.0",
+    "@domecs/persist": "^1.0.0"
   },
   "devDependencies": {
-    "@types/node": "^22.10.1",
-    "typescript": "^5.6.3",
-    "vite": "^5.4.11",
-    "vitest": "^2.1.9"
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5",
+    "vitest": "^4.1.10"
   }
 }

@@ -59,6 +59,21 @@ describe('DOMECS Studio exemplar', () => {
     expect(doc.dirty).toBe(true)
   })
 
+  it('introspects guest entities and returns detached component values', () => {
+    const studio = createDomecsStudio({ seed: 22, headless: true, guestEntityCount: 4 })
+    const entities = studio.inspectEntities()
+
+    expect(entities).toHaveLength(4)
+    expect(entities[0]?.label).toBe('Player')
+    const transform = entities[0]?.components.find((component) => component.name === 'GuestTransform')
+    expect(transform?.descriptor.fields.x?.kind).toBe('number')
+    expect(transform?.value).toMatchObject({ x: 0, y: 0 })
+
+    ;(transform!.value as { x: number }).x = 999
+    expect(studio.guestWorld.getComponent(entities[0]!.id, GuestTransform)?.x).toBe(0)
+    expect(studio.inspectEntity(999_999)).toBeNull()
+  })
+
   it('keeps selection, hover, and highlight as editor-side components referencing guest entities', () => {
     const studio = createDomecsStudio({ seed: 3, headless: true, guestEntityCount: 8 })
     const ids = studio.guestWorld.snapshot().entities.map((entity) => entity.id)
