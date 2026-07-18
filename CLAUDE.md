@@ -1,8 +1,7 @@
 # DOMECS Studio — DOMECS exemplar
 
-A live world editor for DOMECS. Built on the DOMECS engine (`@domecs/*`), consumed
-from the sibling `../domecs` checkout via `file:` deps — clone this repo alongside
-`domecs`.
+A live world editor for DOMECS. Built on the published DOMECS engine
+(`@domecs/*`).
 
 ## Recording findings
 

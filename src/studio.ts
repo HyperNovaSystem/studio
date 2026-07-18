@@ -74,12 +74,28 @@ export interface StudioRefs {
   reflectedSchemas(): ComponentDescriptor[]
   visibleTree(): ReturnType<World['query']>['entities']
   inspectorFields(): ReturnType<World['query']>['entities']
+  /** A live, read-only view of every guest entity and its components. */
+  inspectEntities(): EntityInspection[]
+  /** A live, read-only view of one guest entity, or null when it no longer exists. */
+  inspectEntity(guestEntityId: Entity): EntityInspection | null
   /**
    * Entity-level diffs between adjacent history checkpoints (engine
    * `diffSnapshots`). On-demand only — `history.snapshots()` returns a
    * defensive copy, so do not call this per frame.
    */
   timelineDiffs(): SnapshotDiff[]
+}
+
+export interface ComponentInspection {
+  name: string
+  descriptor: ComponentDescriptor
+  value: Readonly<Record<string, unknown>>
+}
+
+export interface EntityInspection {
+  id: Entity
+  label: string
+  components: ComponentInspection[]
 }
 
 interface PrefabDefinition {
@@ -290,6 +306,12 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
     inspectorFields() {
       return editorWorld.query(Has(InspectorField)).entities
     },
+    inspectEntities() {
+      return guestWorld.snapshot().entities.map((entity) => inspectGuestEntity(guestWorld, entity.id)!).filter(Boolean)
+    },
+    inspectEntity(guestEntityId) {
+      return inspectGuestEntity(guestWorld, guestEntityId)
+    },
     timelineDiffs() {
       const snapshots = history.snapshots()
       const diffs: SnapshotDiff[] = []
@@ -301,6 +323,27 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
   installEditorSystems(refs, resolveComponentType)
   syncEditorProjection(refs)
   return refs
+}
+
+function inspectGuestEntity(world: World, id: Entity): EntityInspection | null {
+  const types = world.archetype(id)
+  if (types.length === 0) return null
+  const components = types.map((type): ComponentInspection => {
+    const value = world.getComponent(id, type as ComponentType<Record<string, unknown>>)!
+    return {
+      name: type.name,
+      descriptor: world.describeComponent(type),
+      // Do not expose the world's mutable component object through the
+      // introspection API. Editors may display this value; mutations still go
+      // through editField so validation/change tracking remains centralized.
+      value: structuredClone(value),
+    }
+  })
+  return {
+    id,
+    label: world.getComponent(id, GuestName)?.value ?? `Entity ${id}`,
+    components,
+  }
 }
 
 function installEditorSystems(refs: StudioRefs, resolveComponentType: (name: string) => ComponentType<unknown> | undefined): void {
