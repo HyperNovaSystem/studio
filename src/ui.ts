@@ -7,6 +7,7 @@ import type { PanelContext } from './panels/context.js'
 import { handleToolbarClick, renderToolbar } from './panels/toolbar.js'
 import { renderProblems } from './panels/problems.js'
 import { handleComponentTypesChange, handleComponentTypesClick, renderComponentTypesPanel } from './panels/componentTypes.js'
+import { handleEntityTypesChange, handleEntityTypesClick, renderEntityTypesPanel } from './panels/entityTypes.js'
 
 export interface StudioUi {
   /** Re-render, writing to the DOM only when the markup actually changed. */
@@ -60,6 +61,7 @@ export function renderStudioHtml(studio: StudioRefs, ui: UiState = createUiState
         <input type="range" min="0" max="${Math.max(0, scrubber.length - 1)}" value="${scrubber.cursor}" data-scrub>
       </section>
       ${renderComponentTypesPanel(ctx)}
+      ${renderEntityTypesPanel(ctx)}
     </main>
   `
 }
@@ -92,6 +94,7 @@ export function mountStudio(app: HTMLElement, studio: StudioRefs): StudioUi {
     if (play) studio.setPlayback(play.dataset.play as 'paused' | 'playing')
     handleToolbarClick(target, ctx)
     handleComponentTypesClick(target, ctx)
+    handleEntityTypesClick(target, ctx)
     render()
   })
 
@@ -103,6 +106,7 @@ export function mountStudio(app: HTMLElement, studio: StudioRefs): StudioUi {
     }
     if (target.dataset.scrub !== undefined) studio.scrub(Number(target.value))
     handleComponentTypesChange(target, ctx)
+    handleEntityTypesChange(target, ctx)
     render()
   })
 

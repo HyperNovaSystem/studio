@@ -266,3 +266,57 @@ describe('component types panel', () => {
     expect(host.html()).not.toContain('data-confirm-delete-component-type')
   })
 })
+
+describe('entity types panel', () => {
+  function setup() {
+    const studio = createDomecsStudio({ headless: true, ringCapacity: 8 })
+    const host = fakeHost()
+    mountStudio(host.element, studio)
+    return { studio, host }
+  }
+
+  it('creating a new entity type: name + checked components, then Create, calls upsertEntityType', () => {
+    const { studio, host } = setup()
+
+    host.dispatch('change', { target: fakeElement({ data: { 'new-entity-type-name': '' }, value: 'goblin' }) })
+    host.dispatch('change', { target: fakeElement({ data: { 'new-entity-type-component': 'GuestTransform' }, checked: true }) })
+    host.dispatch('click', { target: fakeElement({ data: { 'create-entity-type': '' } }) })
+
+    const created = studio.projectSession.doc.entityTypes.find((et) => et.name === 'goblin')
+    expect(created).toBeTruthy()
+    expect(created!.components).toEqual({ GuestTransform: {} })
+  })
+
+  it('editing a default value coerces by field kind and applies via upsertEntityType', () => {
+    const { studio, host } = setup()
+    studio.catalog.upsertEntityType({ name: 'goblin', components: { GuestTransform: { x: 0 } } })
+
+    host.dispatch('change', { target: fakeElement({ data: { 'entity-type-default': 'goblin:GuestTransform:x', 'field-kind-hint': 'number' }, value: '42' }) })
+
+    const et = studio.projectSession.doc.entityTypes.find((e) => e.name === 'goblin')!
+    expect(et.components.GuestTransform!.x).toBe(42)
+  })
+
+  it('deleting an entity type with "strip" preserves instances as inline overrides', () => {
+    const { studio, host } = setup()
+    studio.catalog.upsertEntityType({ name: 'goblin', components: { GuestTransform: { x: 5 } } })
+    studio.catalog.spawnFromType('goblin', 5, 0)
+
+    host.dispatch('click', { target: fakeElement({ data: { 'strip-entity-type': 'goblin' } }) })
+
+    expect(studio.projectSession.doc.entityTypes.some((et) => et.name === 'goblin')).toBe(false)
+    expect(studio.guestWorld.snapshot().entities.length).toBeGreaterThan(0)
+  })
+
+  it('deleting an entity type with "despawn" removes its instances', () => {
+    const { studio, host } = setup()
+    studio.catalog.upsertEntityType({ name: 'goblin', components: { GuestTransform: { x: 5 } } })
+    studio.catalog.spawnFromType('goblin', 5, 0)
+    const before = studio.guestWorld.snapshot().entities.length
+
+    host.dispatch('click', { target: fakeElement({ data: { 'despawn-entity-type': 'goblin' } }) })
+
+    expect(studio.projectSession.doc.entityTypes.some((et) => et.name === 'goblin')).toBe(false)
+    expect(studio.guestWorld.snapshot().entities.length).toBe(before - 1)
+  })
+})
