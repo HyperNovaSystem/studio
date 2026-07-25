@@ -320,3 +320,58 @@ describe('entity types panel', () => {
     expect(studio.guestWorld.snapshot().entities.length).toBe(before - 1)
   })
 })
+
+describe('systems panel', () => {
+  function setup() {
+    const studio = createDomecsStudio({ headless: true, ringCapacity: 8 })
+    studio.projectSession.mutate((doc) => {
+      doc.systems.push({ name: 'decay', schedule: 'tick', query: ['Health'], actions: [{ set: 'Health.hp', expr: 'Health.hp - 1' }] })
+    })
+    const host = fakeHost()
+    mountStudio(host.element, studio)
+    return { studio, host }
+  }
+
+  it('lists systems with an enable toggle and a raw JSON textarea', () => {
+    const { host } = setup()
+    expect(host.html()).toContain('data-system-enabled="0"')
+    expect(host.html()).toContain('data-system-json="0"')
+    expect(host.html()).toContain('"name": "decay"')
+  })
+
+  it('toggling enabled mutates the system in place, not via the catalog', () => {
+    const { studio, host } = setup()
+    host.dispatch('change', { target: fakeElement({ data: { 'system-enabled': '0' }, checked: false }) })
+    expect(studio.projectSession.doc.systems[0]!.enabled).toBe(false)
+  })
+
+  it('valid JSON on change applies the mutation and clears any prior error', () => {
+    const { studio, host } = setup()
+    const edited = JSON.stringify({ name: 'decay', schedule: 'fixed', query: ['Health'], actions: [{ set: 'Health.hp', expr: '0' }] })
+
+    host.dispatch('change', { target: fakeElement({ data: { 'system-json': '0' }, value: edited }) })
+
+    expect(studio.projectSession.doc.systems[0]!.schedule).toBe('fixed')
+    expect(host.html()).not.toContain('field-error')
+  })
+
+  it('invalid JSON on change shows an inline error and does not mutate the doc', () => {
+    const { studio, host } = setup()
+    const before = JSON.stringify(studio.projectSession.doc.systems[0])
+
+    host.dispatch('change', { target: fakeElement({ data: { 'system-json': '0' }, value: '{ not json' }) })
+
+    expect(JSON.stringify(studio.projectSession.doc.systems[0])).toBe(before)
+    expect(host.html()).toContain('field-error')
+  })
+
+  it('a JSON value that parses but fails the minimal shape check is also rejected, not applied', () => {
+    const { studio, host } = setup()
+    const before = JSON.stringify(studio.projectSession.doc.systems[0])
+
+    host.dispatch('change', { target: fakeElement({ data: { 'system-json': '0' }, value: JSON.stringify({ name: 'decay' }) }) })
+
+    expect(JSON.stringify(studio.projectSession.doc.systems[0])).toBe(before)
+    expect(host.html()).toContain('field-error')
+  })
+})
