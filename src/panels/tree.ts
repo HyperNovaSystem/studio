@@ -1,9 +1,12 @@
 import { entry, Has, type ComponentType, type Entity, type EntityView } from '@domecs/core'
+import { childrenOf, despawnTree, setParent } from '@domecs/scene'
 import { EntityTreeNode } from '../components.js'
 import type { PanelContext } from './context.js'
 import { syncAndRender } from './context.js'
 
-type TreeRow = EntityView & { EntityTreeNode: { guestEntityId: number; label: string; componentCount: number; selected: boolean } }
+type TreeRow = EntityView & {
+  EntityTreeNode: { guestEntityId: number; label: string; depth: number; componentCount: number; selected: boolean }
+}
 
 /**
  * Copies a live guest entity's current component values onto a new entity —
@@ -38,13 +41,26 @@ function renderAddFromType(ctx: PanelContext): string {
   `
 }
 
-function renderRow(row: TreeRow): string {
+function renderRow(ctx: PanelContext, row: TreeRow): string {
+  const { studio, ui } = ctx
   const id = row.EntityTreeNode.guestEntityId
+  const depth = row.EntityTreeNode.depth
+  const childCount = childrenOf(studio.guestWorld, id).length
+  const pendingDespawn = ui.confirmDespawnEntity === id
+
+  const deleteControl = pendingDespawn
+    ? `
+      <span class="confirm-delete">has ${childCount} child(ren)</span>
+      <button data-confirm-despawn="${id}">Confirm delete</button>
+      <button data-cancel-despawn="${id}">Cancel</button>
+    `
+    : `<button class="icon" data-despawn="${id}" title="Delete">✕</button>`
+
   return `
-    <div class="tree-row-wrap">
+    <div class="tree-row-wrap" style="--depth:${depth}" draggable="true" data-drag-entity="${id}">
       <button class="tree-row ${row.EntityTreeNode.selected ? 'selected' : ''}" data-select="${id}">${row.EntityTreeNode.label}<small>${row.EntityTreeNode.componentCount}</small></button>
       <button class="icon" data-duplicate="${id}" title="Duplicate">⧉</button>
-      <button class="icon" data-despawn="${id}" title="Delete">✕</button>
+      ${deleteControl}
     </div>
   `
 }
@@ -55,7 +71,8 @@ export function renderTreePanel(ctx: PanelContext): string {
     <section class="panel tree">
       <h2>Entity Tree</h2>
       ${renderAddFromType(ctx)}
-      ${tree.map(renderRow).join('')}
+      <div class="tree-root-drop" data-drag-root>Drop here to unparent (root)</div>
+      ${tree.map((row) => renderRow(ctx, row)).join('')}
     </section>
   `
 }
@@ -78,9 +95,36 @@ export function handleTreeClick(target: HTMLElement, ctx: PanelContext): void {
     return
   }
 
+  // A childless entity despawns immediately (despawnTree degenerates to a
+  // plain despawn for a leaf — see its doc comment). One with children needs
+  // a two-step confirm first, the same pattern componentTypes.ts's
+  // delete-with-usageCount uses: first click records which entity is
+  // pending and shows its child count; a second click on the resulting
+  // Confirm button is what actually calls despawnTree.
   const despawn = target.closest<HTMLElement>('[data-despawn]')
   if (despawn) {
-    studio.guestWorld.despawn(Number(despawn.dataset.despawn))
+    const id = Number(despawn.dataset.despawn)
+    if (childrenOf(studio.guestWorld, id).length > 0) {
+      ui.confirmDespawnEntity = id
+      ctx.render()
+    } else {
+      despawnTree(studio.guestWorld, id)
+      syncAndRender(ctx)
+    }
+    return
+  }
+
+  const cancelDespawn = target.closest<HTMLElement>('[data-cancel-despawn]')
+  if (cancelDespawn) {
+    ui.confirmDespawnEntity = null
+    ctx.render()
+    return
+  }
+
+  const confirmDespawn = target.closest<HTMLElement>('[data-confirm-despawn]')
+  if (confirmDespawn) {
+    despawnTree(studio.guestWorld, Number(confirmDespawn.dataset.confirmDespawn))
+    ui.confirmDespawnEntity = null
     syncAndRender(ctx)
     return
   }
@@ -90,6 +134,43 @@ export function handleTreeClick(target: HTMLElement, ctx: PanelContext): void {
     duplicateEntity(studio.guestWorld, Number(duplicate.dataset.duplicate))
     syncAndRender(ctx)
   }
+}
+
+/**
+ * `dragstart` delegate: records which guest entity is being dragged in
+ * `ui.draggedGuestEntityId`, the fake-host-testable stand-in for
+ * `event.dataTransfer` (see UiState's doc comment).
+ */
+export function handleTreeDragStart(target: HTMLElement, ctx: PanelContext): void {
+  const row = target.closest<HTMLElement>('[data-drag-entity]')
+  if (!row) return
+  ctx.ui.draggedGuestEntityId = Number(row.dataset.dragEntity)
+}
+
+/**
+ * `drop` delegate: reparents the entity `dragstart` recorded onto whatever
+ * was dropped on — another row (`setParent(dragged, target)`) or the
+ * dedicated root-drop strip (`setParent(dragged, null)`, unparenting). A
+ * rejected `setParent` (e.g. a cycle) surfaces through the same
+ * `ui.lastCatalogProblems` -> problems-strip path every other catalog
+ * mutation in this app uses, never a JS `alert()`.
+ */
+export function handleTreeDrop(target: HTMLElement, ctx: PanelContext): void {
+  const { studio, ui } = ctx
+  const draggedId = ui.draggedGuestEntityId
+  ui.draggedGuestEntityId = null
+  if (draggedId === null) return
+
+  const rootZone = target.closest<HTMLElement>('[data-drag-root]')
+  const targetRow = rootZone ? null : target.closest<HTMLElement>('[data-drag-entity]')
+  if (!rootZone && !targetRow) return
+
+  const targetId = rootZone ? null : Number(targetRow!.dataset.dragEntity)
+  if (targetId === draggedId) return
+
+  const result = setParent(studio.guestWorld, draggedId, targetId)
+  ui.lastCatalogProblems = result.ok ? [] : [{ path: `tree.reparent[${draggedId}]`, message: result.reason }]
+  syncAndRender(ctx)
 }
 
 export function handleTreeChange(target: HTMLInputElement, ctx: PanelContext): void {

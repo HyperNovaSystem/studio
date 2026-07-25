@@ -51,7 +51,8 @@ button, input { font: inherit; }
 .entity-type-actions { margin-top: 6px; display: flex; gap: 8px; }
 .system-row textarea { width: 100%; min-height: 90px; background: #0b0e17; color: #eef2ff; border: 1px solid #35415f; border-radius: 6px; padding: 6px; font-family: ui-monospace, monospace; font-size: 12px; box-sizing: border-box; margin-top: 6px; }
 .system-row .field-error { color: #ff9a9a; font-size: 12px; margin: 4px 0 0; }
-.tree-row-wrap { display: flex; align-items: center; gap: 4px; margin: 3px 0; }
+.tree-row-wrap { display: flex; align-items: center; gap: 4px; margin: 3px 0; padding-left: calc(var(--depth, 0) * 16px); }
 .tree-row-wrap .tree-row { margin: 0; flex: 1; }
 .tree-row-wrap button.icon { background: #26314a; color: #e6ebff; border: 1px solid #3a4568; border-radius: 6px; padding: 4px 7px; cursor: pointer; }
 .tree-add-from-type { display: flex; gap: 6px; margin-bottom: 8px; }
+.tree-root-drop { margin-bottom: 8px; padding: 8px; border: 1px dashed #3a4568; border-radius: 8px; color: #92a0c7; font-size: 12px; text-align: center; }

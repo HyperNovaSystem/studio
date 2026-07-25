@@ -30,6 +30,17 @@ export interface UiState {
   newEntityTypeComponents: Set<string>
   /** Entity type selected in the tree's "add from type" dropdown. */
   spawnEntityType: string
+  /**
+   * Guest entity id currently mid-drag over the tree, set by `dragstart` and
+   * consumed (cleared) by `drop`. HTML5 DnD's own `DataTransfer` payload has
+   * no fake-host/jsdom-free equivalent in this codebase's test pattern, so
+   * this ordinary UI-state field is the source of truth for "what's being
+   * dragged" instead — the same role `event.dataTransfer` plays in a real
+   * browser, just readable without one.
+   */
+  draggedGuestEntityId: number | null
+  /** Guest entity id whose tree-row delete is pending a two-step confirm (it has children — see despawnTree's usage in tree.ts). */
+  confirmDespawnEntity: number | null
   /** Raw (possibly invalid) textarea text per system index, keyed while the parsed value has not yet validated. */
   systemJsonDraft: Map<number, string>
   /** Validation error message per system index, cleared once that system's JSON parses and applies. */
@@ -46,6 +57,8 @@ export function createUiState(): UiState {
     newEntityTypeName: '',
     newEntityTypeComponents: new Set(),
     spawnEntityType: '',
+    draggedGuestEntityId: null,
+    confirmDespawnEntity: null,
     systemJsonDraft: new Map(),
     systemJsonError: new Map(),
     lastCatalogProblems: [],

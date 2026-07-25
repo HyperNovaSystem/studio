@@ -9,7 +9,7 @@ import { renderProblems } from './panels/problems.js'
 import { handleComponentTypesChange, handleComponentTypesClick, renderComponentTypesPanel } from './panels/componentTypes.js'
 import { handleEntityTypesChange, handleEntityTypesClick, renderEntityTypesPanel } from './panels/entityTypes.js'
 import { handleSystemsChange, renderSystemsPanel } from './panels/systems.js'
-import { handleTreeChange, handleTreeClick, renderTreePanel } from './panels/tree.js'
+import { handleTreeChange, handleTreeClick, handleTreeDragStart, handleTreeDrop, renderTreePanel } from './panels/tree.js'
 
 export interface StudioUi {
   /** Re-render, writing to the DOM only when the markup actually changed. */
@@ -103,6 +103,31 @@ export function mountStudio(app: HTMLElement, studio: StudioRefs): StudioUi {
     handleComponentTypesClick(target, ctx)
     handleEntityTypesClick(target, ctx)
     handleTreeClick(target, ctx)
+    render()
+  })
+
+  // First HTML5 drag-and-drop interaction in this app: dragstart records
+  // which row is being dragged (ui.draggedGuestEntityId — see UiState's doc
+  // comment for why this app-level state, not event.dataTransfer, is the
+  // source of truth); dragover must call preventDefault to opt a drop
+  // target into accepting a drop at all (DOM default is to reject it); drop
+  // does the actual reparent.
+  app.addEventListener('dragstart', (event) => {
+    const target = event.target as HTMLElement
+    handleTreeDragStart(target, ctx)
+  })
+
+  app.addEventListener('dragover', (event) => {
+    const target = event.target as HTMLElement
+    if (target.closest?.('[data-drag-entity]') || target.closest?.('[data-drag-root]')) {
+      event.preventDefault?.()
+    }
+  })
+
+  app.addEventListener('drop', (event) => {
+    event.preventDefault?.()
+    const target = event.target as HTMLElement
+    handleTreeDrop(target, ctx)
     render()
   })
 

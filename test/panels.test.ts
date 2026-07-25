@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { createWorld } from '@domecs/core'
+import { Parent, setParent } from '@domecs/scene'
 import { createDomecsStudio } from '../src/studio.js'
 import { mountStudio, renderStudioHtml } from '../src/ui.js'
 import { createMemoryProjectStore, createProjectSession, type ProjectDocument } from '../src/project.js'
@@ -431,5 +432,126 @@ describe('entity tree panel — add from type / delete / duplicate', () => {
     const original = entities.find((e) => e.id === id)!
     const copy = entities.find((e) => e.id !== id)!
     expect(copy.components).toEqual(original.components)
+  })
+})
+
+describe('entity tree panel — hierarchy (depth indent / drag-drop reparent / tree-aware delete)', () => {
+  function setup() {
+    const guestWorld = createWorld({ headless: true })
+    const studio = createDomecsStudio({ headless: true, ringCapacity: 8, guestWorld })
+    const host = fakeHost()
+    const ui = mountStudio(host.element, studio)
+    return { studio, host, ui }
+  }
+
+  it('indents a row by its EntityTreeNode depth, and re-renders the indent when depth changes', () => {
+    const { studio, host, ui } = setup()
+    const parentId = studio.catalog.spawnFromType('prop.crate', 0, 0)!
+    const childId = studio.catalog.spawnFromType('prop.crate', 0, 0)!
+    studio.sync()
+    ui.render()
+
+    expect(host.html()).toContain(`style="--depth:0" draggable="true" data-drag-entity="${childId}"`)
+
+    const result = setParent(studio.guestWorld, childId, parentId)
+    expect(result.ok).toBe(true)
+    studio.sync()
+    ui.render()
+
+    expect(host.html()).toContain(`style="--depth:1" draggable="true" data-drag-entity="${childId}"`)
+
+    const unparented = setParent(studio.guestWorld, childId, null)
+    expect(unparented.ok).toBe(true)
+    studio.sync()
+    ui.render()
+
+    expect(host.html()).toContain(`style="--depth:0" draggable="true" data-drag-entity="${childId}"`)
+  })
+
+  it('dropping row A onto row B reparents A under B via setParent', () => {
+    const { studio, host } = setup()
+    const aId = studio.catalog.spawnFromType('prop.crate', 0, 0)!
+    const bId = studio.catalog.spawnFromType('prop.crate', 0, 0)!
+    studio.sync()
+
+    host.dispatch('dragstart', { target: fakeElement({ data: { 'drag-entity': String(aId) } }) })
+    host.dispatch('drop', { target: fakeElement({ data: { 'drag-entity': String(bId) } }) })
+
+    expect(studio.guestWorld.getComponent(aId, Parent)?.entity).toBe(bId)
+  })
+
+  it('dropping onto the root strip clears the dragged entity\'s parent', () => {
+    const { studio, host } = setup()
+    const aId = studio.catalog.spawnFromType('prop.crate', 0, 0)!
+    const bId = studio.catalog.spawnFromType('prop.crate', 0, 0)!
+    studio.sync()
+    expect(setParent(studio.guestWorld, aId, bId).ok).toBe(true)
+
+    host.dispatch('dragstart', { target: fakeElement({ data: { 'drag-entity': String(aId) } }) })
+    host.dispatch('drop', { target: fakeElement({ data: { 'drag-root': '' } }) })
+
+    expect(studio.guestWorld.getComponent(aId, Parent)?.entity ?? null).toBeNull()
+  })
+
+  it('a rejected reparent (cycle) is surfaced via the problems strip rather than mutating state', () => {
+    const { studio, host } = setup()
+    const aId = studio.catalog.spawnFromType('prop.crate', 0, 0)!
+    const bId = studio.catalog.spawnFromType('prop.crate', 0, 0)!
+    studio.sync()
+    // b is already a's child; dropping a onto b would create a cycle.
+    expect(setParent(studio.guestWorld, bId, aId).ok).toBe(true)
+
+    host.dispatch('dragstart', { target: fakeElement({ data: { 'drag-entity': String(aId) } }) })
+    host.dispatch('drop', { target: fakeElement({ data: { 'drag-entity': String(bId) } }) })
+
+    expect(studio.guestWorld.getComponent(aId, Parent)?.entity ?? null).toBeNull()
+    expect(host.html()).toContain('cycle')
+  })
+
+  it('deleting a childless entity despawns immediately (single click)', () => {
+    const { studio, host } = setup()
+    const id = studio.catalog.spawnFromType('prop.crate', 0, 0)!
+    studio.sync()
+
+    host.dispatch('click', { target: fakeElement({ data: { despawn: String(id) } }) })
+
+    expect(studio.guestWorld.snapshot().entities.some((e) => e.id === id)).toBe(false)
+  })
+
+  it('deleting an entity with children is two-step: first click shows the child count without despawning, second click despawns the whole subtree', () => {
+    const { studio, host } = setup()
+    const parentId = studio.catalog.spawnFromType('prop.crate', 0, 0)!
+    const childId = studio.catalog.spawnFromType('prop.crate', 0, 0)!
+    studio.sync()
+    expect(setParent(studio.guestWorld, childId, parentId).ok).toBe(true)
+    studio.sync()
+
+    host.dispatch('click', { target: fakeElement({ data: { despawn: String(parentId) } }) })
+
+    expect(studio.guestWorld.snapshot().entities.some((e) => e.id === parentId)).toBe(true)
+    expect(studio.guestWorld.snapshot().entities.some((e) => e.id === childId)).toBe(true)
+    expect(host.html()).toContain('1 child')
+    expect(host.html()).toContain(`data-confirm-despawn="${parentId}"`)
+
+    host.dispatch('click', { target: fakeElement({ data: { 'confirm-despawn': String(parentId) } }) })
+
+    expect(studio.guestWorld.snapshot().entities.some((e) => e.id === parentId)).toBe(false)
+    expect(studio.guestWorld.snapshot().entities.some((e) => e.id === childId)).toBe(false)
+  })
+
+  it('canceling a pending tree-aware delete leaves parent and child intact', () => {
+    const { studio, host } = setup()
+    const parentId = studio.catalog.spawnFromType('prop.crate', 0, 0)!
+    const childId = studio.catalog.spawnFromType('prop.crate', 0, 0)!
+    studio.sync()
+    expect(setParent(studio.guestWorld, childId, parentId).ok).toBe(true)
+    studio.sync()
+
+    host.dispatch('click', { target: fakeElement({ data: { despawn: String(parentId) } }) })
+    host.dispatch('click', { target: fakeElement({ data: { 'cancel-despawn': String(parentId) } }) })
+
+    expect(studio.guestWorld.snapshot().entities.some((e) => e.id === parentId)).toBe(true)
+    expect(studio.guestWorld.snapshot().entities.some((e) => e.id === childId)).toBe(true)
+    expect(host.html()).not.toContain('data-confirm-despawn')
   })
 })
