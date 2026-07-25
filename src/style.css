@@ -2,9 +2,20 @@
 body { margin: 0; }
 button, input { font: inherit; }
 .studio-shell { display: grid; grid-template-columns: 280px 1fr 340px; grid-template-rows: auto 1fr 180px; gap: 10px; height: 100vh; padding: 10px; box-sizing: border-box; }
-.topbar { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; background: #191d2b; border: 1px solid #2c344c; padding: 10px 14px; border-radius: 12px; }
+.topbar { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; background: #191d2b; border: 1px solid #2c344c; padding: 10px 14px; border-radius: 12px; flex-wrap: wrap; gap: 10px; }
 .topbar span { margin-left: 12px; color: #9fa8c6; }
 .stats { color: #b8c0dc; font-size: 13px; }
+.toolbar { display: flex; align-items: center; gap: 8px; }
+.toolbar button { background: #26314a; color: #e6ebff; border: 1px solid #3a4568; padding: 6px 11px; border-radius: 7px; cursor: pointer; }
+.toolbar button:hover { background: #33406298; border-color: #4a7cff; }
+.toolbar .project-name { margin-left: 6px; color: #eef2ff; font-weight: 600; }
+.toolbar .dirty-marker { color: #ffce6b; font-size: 12px; }
+.toolbar .dirty-marker[data-dirty="false"] { color: #7fe0a5; }
+.problems { grid-column: 1 / -1; padding: 8px 14px; }
+.problems h2 { margin: 0 0 6px; font-size: 12px; color: #ff9a9a; text-transform: uppercase; letter-spacing: .08em; }
+.problems ul { margin: 0; padding-left: 18px; color: #ffc9c9; font-size: 13px; }
+.problems .no-problems { margin: 0; color: #7fe0a5; font-size: 13px; }
+.problems code { color: #ffd38d; }
 .panel { background: #171b28; border: 1px solid #2c344c; border-radius: 12px; padding: 12px; overflow: auto; box-shadow: 0 12px 30px #0004; }
 .panel h2 { margin: 0 0 10px; font-size: 14px; color: #9bdcff; text-transform: uppercase; letter-spacing: .08em; }
 .tree { grid-row: 2 / 4; }

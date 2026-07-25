@@ -2,13 +2,18 @@ import { Has } from '@domecs/core'
 import type { EntityView } from '@domecs/core'
 import { ComponentInspector, EntityTreeNode, GuestSprite, GuestTransform, InspectorField, PlaybackState, StudioRoot, TimeTravelScrubber } from './components.js'
 import type { StudioRefs } from './studio.js'
+import { createUiState, type UiState } from './panels/state.js'
+import type { PanelContext } from './panels/context.js'
+import { handleToolbarClick, renderToolbar } from './panels/toolbar.js'
+import { renderProblems } from './panels/problems.js'
 
 export interface StudioUi {
   /** Re-render, writing to the DOM only when the markup actually changed. */
   render(): void
 }
 
-export function renderStudioHtml(studio: StudioRefs): string {
+export function renderStudioHtml(studio: StudioRefs, ui: UiState = createUiState()): string {
+  const ctx: PanelContext = { studio, ui, render: () => {} }
   const root = studio.editorWorld.getComponent(studio.studioId, StudioRoot)!
   const playback = studio.editorWorld.getComponent(studio.playbackId, PlaybackState)!
   const scrubber = studio.editorWorld.getComponent(studio.scrubberId, TimeTravelScrubber)!
@@ -21,7 +26,9 @@ export function renderStudioHtml(studio: StudioRefs): string {
       <header class="topbar">
         <div><strong>${root.title}</strong><span>${root.guestTitle}</span></div>
         <div class="stats">editor ${root.editorEntityCount} · guest ${root.guestEntityCount} · reflected ${root.reflectedComponentTypes}</div>
+        ${renderToolbar(ctx)}
       </header>
+      ${renderProblems(ctx)}
       <section class="panel tree">
         <h2>Entity Tree</h2>
         ${tree.map((row) => `<button class="tree-row ${row.EntityTreeNode.selected ? 'selected' : ''}" data-select="${row.EntityTreeNode.guestEntityId}">${row.EntityTreeNode.label}<small>${row.EntityTreeNode.componentCount}</small></button>`).join('')}
@@ -57,9 +64,10 @@ export function renderStudioHtml(studio: StudioRefs): string {
 
 export function mountStudio(app: HTMLElement, studio: StudioRefs): StudioUi {
   let lastHtml: string | null = null
+  const ui = createUiState()
 
   function render(): void {
-    const html = renderStudioHtml(studio)
+    const html = renderStudioHtml(studio, ui)
     // The editor world ticks every frame. Reassigning innerHTML on an
     // unchanged render destroys the node between mousedown and mouseup, so no
     // click event ever fires and focused inputs lose their caret.
@@ -70,6 +78,8 @@ export function mountStudio(app: HTMLElement, studio: StudioRefs): StudioUi {
     if (focusKey) restoreFocus(app, focusKey)
   }
 
+  const ctx: PanelContext = { studio, ui, render }
+
   app.addEventListener('click', (event) => {
     const target = event.target as HTMLElement
     const select = target.closest<HTMLElement>('[data-select]')
@@ -78,6 +88,7 @@ export function mountStudio(app: HTMLElement, studio: StudioRefs): StudioUi {
     if (step) studio.stepGuest(Number(step.dataset.step))
     const play = target.closest<HTMLElement>('[data-play]')
     if (play) studio.setPlayback(play.dataset.play as 'paused' | 'playing')
+    handleToolbarClick(target, ctx)
     render()
   })
 

@@ -73,6 +73,8 @@ export interface StudioRefs {
   sceneDocumentId: Entity
   bridge: StudioPluginBridge
   catalog: Catalog
+  /** The project document backing `catalog` — session.doc/dirty/problems + open/save/saveAs/mutate/undo/redo. Exposed here (rather than a separate mountStudio param) because it already exists as a local in this function; the UI layer reads/mutates project state through it. */
+  projectSession: ProjectSession
   projectionEntityIds: Entity[]
   select(guestEntityId: Entity | null): void
   hover(guestEntityId: Entity | null): void
@@ -314,6 +316,7 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
     sceneDocumentId,
     bridge,
     catalog,
+    projectSession,
     projectionEntityIds: [],
     select(guestEntityId) {
       editorWorld.emit(SelectGuestEntityEvent, { guestEntityId })
