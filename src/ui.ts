@@ -1,6 +1,6 @@
 import { Has } from '@domecs/core'
 import type { EntityView } from '@domecs/core'
-import { ComponentInspector, EntityTreeNode, GuestSprite, GuestTransform, InspectorField, PlaybackState, StudioRoot, TimeTravelScrubber } from './components.js'
+import { ComponentInspector, GuestSprite, GuestTransform, InspectorField, PlaybackState, StudioRoot, TimeTravelScrubber } from './components.js'
 import type { StudioRefs } from './studio.js'
 import { createUiState, type UiState } from './panels/state.js'
 import type { PanelContext } from './panels/context.js'
@@ -9,6 +9,7 @@ import { renderProblems } from './panels/problems.js'
 import { handleComponentTypesChange, handleComponentTypesClick, renderComponentTypesPanel } from './panels/componentTypes.js'
 import { handleEntityTypesChange, handleEntityTypesClick, renderEntityTypesPanel } from './panels/entityTypes.js'
 import { handleSystemsChange, renderSystemsPanel } from './panels/systems.js'
+import { handleTreeChange, handleTreeClick, renderTreePanel } from './panels/tree.js'
 
 export interface StudioUi {
   /** Re-render, writing to the DOM only when the markup actually changed. */
@@ -20,7 +21,6 @@ export function renderStudioHtml(studio: StudioRefs, ui: UiState = createUiState
   const root = studio.editorWorld.getComponent(studio.studioId, StudioRoot)!
   const playback = studio.editorWorld.getComponent(studio.playbackId, PlaybackState)!
   const scrubber = studio.editorWorld.getComponent(studio.scrubberId, TimeTravelScrubber)!
-  const tree = studio.editorWorld.query(Has(EntityTreeNode)).entities as Array<EntityView & { EntityTreeNode: { guestEntityId: number; label: string; componentCount: number; selected: boolean } }>
   const components = studio.editorWorld.query(Has(ComponentInspector)).entities as Array<EntityView & { ComponentInspector: { componentName: string } }>
   const fields = studio.editorWorld.query(Has(InspectorField)).entities as Array<EntityView & { InspectorField: { guestEntityId: number; componentName: string; field: string; valuePreview: string } }>
 
@@ -32,10 +32,7 @@ export function renderStudioHtml(studio: StudioRefs, ui: UiState = createUiState
         ${renderToolbar(ctx)}
       </header>
       ${renderProblems(ctx)}
-      <section class="panel tree">
-        <h2>Entity Tree</h2>
-        ${tree.map((row) => `<button class="tree-row ${row.EntityTreeNode.selected ? 'selected' : ''}" data-select="${row.EntityTreeNode.guestEntityId}">${row.EntityTreeNode.label}<small>${row.EntityTreeNode.componentCount}</small></button>`).join('')}
-      </section>
+      ${renderTreePanel(ctx)}
       <section class="panel viewport">
         <h2>Guest Viewport</h2>
         <div class="stage">
@@ -88,8 +85,6 @@ export function mountStudio(app: HTMLElement, studio: StudioRefs): StudioUi {
 
   app.addEventListener('click', (event) => {
     const target = event.target as HTMLElement
-    const select = target.closest<HTMLElement>('[data-select]')
-    if (select) studio.select(Number(select.dataset.select))
     const step = target.closest<HTMLElement>('[data-step]')
     if (step) studio.stepGuest(Number(step.dataset.step))
     const play = target.closest<HTMLElement>('[data-play]')
@@ -97,6 +92,7 @@ export function mountStudio(app: HTMLElement, studio: StudioRefs): StudioUi {
     handleToolbarClick(target, ctx)
     handleComponentTypesClick(target, ctx)
     handleEntityTypesClick(target, ctx)
+    handleTreeClick(target, ctx)
     render()
   })
 
@@ -110,6 +106,7 @@ export function mountStudio(app: HTMLElement, studio: StudioRefs): StudioUi {
     handleComponentTypesChange(target, ctx)
     handleEntityTypesChange(target, ctx)
     handleSystemsChange(target, ctx)
+    handleTreeChange(target, ctx)
     render()
   })
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { createWorld } from '@domecs/core'
 import { createDomecsStudio } from '../src/studio.js'
 import { mountStudio, renderStudioHtml } from '../src/ui.js'
 import { createMemoryProjectStore, createProjectSession, type ProjectDocument } from '../src/project.js'
@@ -373,5 +374,62 @@ describe('systems panel', () => {
 
     expect(JSON.stringify(studio.projectSession.doc.systems[0])).toBe(before)
     expect(host.html()).toContain('field-error')
+  })
+})
+
+describe('entity tree panel — add from type / delete / duplicate', () => {
+  function setup() {
+    // An empty custom guestWorld (rather than the 24-entity demo scene) keeps
+    // these tree-row assertions focused on exactly the entities each test
+    // creates. createDomecsStudio still seeds the default prop.crate /
+    // enemy.spark / trigger.door entityTypes since no projectSession is
+    // supplied either.
+    const guestWorld = createWorld({ headless: true })
+    const studio = createDomecsStudio({ headless: true, ringCapacity: 8, guestWorld })
+    const host = fakeHost()
+    mountStudio(host.element, studio)
+    return { studio, host }
+  }
+
+  it('renders an add-from-type dropdown listing the known entity types', () => {
+    const { host } = setup()
+    expect(host.html()).toContain('data-spawn-entity-type')
+    expect(host.html()).toContain('data-spawn-from-type')
+    expect(host.html()).toContain('prop.crate')
+  })
+
+  it('Add spawns via catalog.spawnFromType and the new entity appears in the tree', () => {
+    const { studio, host } = setup()
+    expect(studio.guestWorld.snapshot().entities).toHaveLength(0)
+
+    host.dispatch('change', { target: fakeElement({ data: { 'spawn-entity-type': '' }, value: 'prop.crate' }) })
+    host.dispatch('click', { target: fakeElement({ data: { 'spawn-from-type': '' } }) })
+
+    expect(studio.guestWorld.snapshot().entities).toHaveLength(1)
+    expect(host.html()).toContain('Crate')
+  })
+
+  it('the delete button despawns the guest entity directly via guestWorld.despawn', () => {
+    const { studio, host } = setup()
+    const id = studio.catalog.spawnFromType('prop.crate', 0, 0)!
+    studio.sync()
+
+    host.dispatch('click', { target: fakeElement({ data: { despawn: String(id) } }) })
+
+    expect(studio.guestWorld.snapshot().entities.some((e) => e.id === id)).toBe(false)
+  })
+
+  it('the duplicate button spawns a new entity carrying a copy of the source entity\'s live component values', () => {
+    const { studio, host } = setup()
+    const id = studio.catalog.spawnFromType('prop.crate', 7, 9)!
+    studio.sync()
+
+    host.dispatch('click', { target: fakeElement({ data: { duplicate: String(id) } }) })
+
+    const entities = studio.guestWorld.snapshot().entities
+    expect(entities).toHaveLength(2)
+    const original = entities.find((e) => e.id === id)!
+    const copy = entities.find((e) => e.id !== id)!
+    expect(copy.components).toEqual(original.components)
   })
 })
