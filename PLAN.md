@@ -41,32 +41,38 @@
 **Produces (binding interfaces):**
 ```ts
 interface ComponentTypeData { name: string; fields: { name: string; kind: FieldKind; default?: unknown }[] }
-function serializeComponentType(type: ComponentType<any>): ComponentTypeData
-function registerComponentTypes(data: ComponentTypeData[], reserved: ReadonlySet<string>): { types: ComponentType<any>[]; problems: Problem[] }
-interface Problem { path: string; message: string }          // e.g. "componentTypes[2].fields[0].kind"
-interface ProjectDocument { format: 'domecs-project'; version: number; meta: ProjectMeta; componentTypes: ComponentTypeData[]; entityTypes: EntityTypeData[]; systems: SystemData[]; scenes: SceneData[] }
-interface EntityTypeData { name: string; components: Record<string, Record<string, unknown>> }
-interface SystemData { name: string; schedule: 'tick' | 'fixed'; enabled?: boolean; query: string[]; when?: string; actions: { set: string; expr: string }[] }
-interface SceneData { name: string; entities: { id: number; type: string | null; parent: number | null; overrides: Record<string, Record<string, unknown>> }[] }
-function validateProject(json: unknown): { doc: ProjectDocument | null; problems: Problem[] }   // never throws
+function serializeComponentType(type: ComponentType<any>, descriptor: ComponentDescriptor): ComponentTypeData
+function registerComponentTypes(data: ComponentTypeData[], reserved: ReadonlySet<string>): { types: ComponentType<any>[]; problems: SchemaProblem[] }
+interface SchemaProblem { path: string; message: string }     // e.g. "componentTypes[2].fields[0].kind"
+interface ComponentTypeData { name: string; transient?: boolean; fields: { name: string; kind: FieldKind; default?: unknown; min?: number; max?: number; step?: number; options?: (string|number)[]; label?: string; readonly?: boolean }[] }
 ```
-Wire `domecs-project` into the existing `migrate` machinery (v1 = identity).
+`ComponentType`, `ComponentDescriptor`, `FieldKind`, `FieldSchema` are the real types from `@domecs/core` `src/types.ts` (already defined — do not redeclare). `registerComponentTypes` builds each `ComponentType` via `defineComponent(name, { schema: { fields }, defaults })`; a name colliding with `reserved` is a `SchemaProblem`, not a throw, and that entry is skipped (the rest still register). This is the ONLY engine deliverable for M0 — no "project document" concept (entityTypes/systems/scenes are Studio authoring concepts, not engine primitives; see M1).
 
-**Acceptance:** round-trip `serializeComponentType`→`registerComponentTypes` yields a working `defineComponent` type; reserved-name collision → Problem, not throw; `validateProject` on malformed input returns problems with precise paths and salvages valid items; engine repo tests green.
+**Acceptance:** `serializeComponentType` on a `defineComponent`d type with an explicit `schema` round-trips through `registerComponentTypes` to an equivalent, usable `ComponentType` (its `.create()` produces the same shape); reserved-name collision → `SchemaProblem`, not throw, other entries still register; unknown `FieldKind` value → `SchemaProblem` with a path, not throw; engine repo tests green (`pnpm --filter @domecs/persist test` from `../domecs`).
 
-### M1: Studio — project state + stores (`src/project.ts`)
+### M1: Studio — project document + state + stores (`src/project.ts`)
 
 **Files:** create `src/project.ts`, `test/project.test.ts`.
 
+The `.domecs.json` project-document format (`format/version/meta/componentTypes/entityTypes/systems/scenes` — spec §Phase 1) is a **Studio** concept, not an engine one: `entityTypes`/`systems`/`scenes` are editor/authoring ideas the engine has no notion of. Only `componentTypes` round-trips through M0's engine helpers.
+
 **Produces:**
 ```ts
+interface ProjectMeta { name: string; modified: string }
+interface EntityTypeData { name: string; components: Record<string, Record<string, unknown>> }
+interface SystemData { name: string; schedule: 'tick' | 'fixed'; enabled?: boolean; query: string[]; when?: string; actions: { set: string; expr: string }[] }
+interface SceneData { name: string; entities: { id: number; type: string | null; parent: number | null; overrides: Record<string, Record<string, unknown>> }[] }
+interface ProjectDocument { format: 'domecs-project'; version: 1; meta: ProjectMeta; componentTypes: ComponentTypeData[]; entityTypes: EntityTypeData[]; systems: SystemData[]; scenes: SceneData[] }
+function validateProject(json: unknown): { doc: ProjectDocument | null; problems: SchemaProblem[] }   // never throws; salvages a best-effort doc alongside problems when the shape is close enough
+function emptyProject(name: string): ProjectDocument
+
 interface ProjectStore { open(): Promise<{ json: unknown; name: string } | null>; save(doc: ProjectDocument): Promise<boolean>; saveAs(doc: ProjectDocument): Promise<boolean>; autosave(doc: ProjectDocument): void; restore(): ProjectDocument | null }
 function createProjectSession(store: ProjectStore): ProjectSession
-interface ProjectSession { doc: ProjectDocument; dirty: boolean; problems: Problem[]; newProject(): void; open(): Promise<boolean>; save(): Promise<boolean>; saveAs(): Promise<boolean>; mutate(fn: (doc: ProjectDocument) => void): void; undo(): void; redo(): void }
+interface ProjectSession { doc: ProjectDocument; dirty: boolean; problems: SchemaProblem[]; newProject(): void; open(): Promise<boolean>; save(): Promise<boolean>; saveAs(): Promise<boolean>; mutate(fn: (doc: ProjectDocument) => void): void; undo(): void; redo(): void }
 ```
 `mutate` deep-clones-on-write into an undo stack (project-level undo per spec). Stores: `createMemoryProjectStore()` (tests), `createLocalStorageProjectStore(storage)` (autosave + restore), `createFileSystemProjectStore()` (FSA — feature-detected, retained handle, download/upload fallback; untested by unit tests, kept to thin glue).
 
-**Acceptance:** session round-trip via memory store; dirty tracking; undo/redo across mutates; autosave debounce (fake timers); restore-on-boot path; studio tests green.
+**Acceptance:** `validateProject` on malformed input returns problems with precise paths and salvages valid items, never throws; session round-trip via memory store; dirty tracking; undo/redo across mutates; autosave debounce (fake timers); restore-on-boot path; studio tests green.
 
 ### M2: Studio — catalog: file → world (`src/catalog.ts`)
 
@@ -75,7 +81,7 @@ interface ProjectSession { doc: ProjectDocument; dirty: boolean; problems: Probl
 **Produces:**
 ```ts
 function createCatalog(session: ProjectSession, guestWorld: World): Catalog
-interface Catalog { reload(): Problem[]; spawnFromType(typeName: string, x: number, y: number): Entity | null; registeredTypes(): ComponentDescriptor[]; entityTypes(): EntityTypeData[]; upsertComponentType(data: ComponentTypeData): Problem[]; deleteComponentType(name: string): { usageCount: number } ; upsertEntityType(data: EntityTypeData): Problem[]; deleteEntityType(name: string, mode: 'strip' | 'despawn'): void; captureScene(name?: string): void }
+interface Catalog { reload(): SchemaProblem[]; spawnFromType(typeName: string, x: number, y: number): Entity | null; registeredTypes(): ComponentDescriptor[]; entityTypes(): EntityTypeData[]; upsertComponentType(data: ComponentTypeData): SchemaProblem[]; deleteComponentType(name: string): { usageCount: number } ; upsertEntityType(data: EntityTypeData): SchemaProblem[]; deleteEntityType(name: string, mode: 'strip' | 'despawn'): void; captureScene(name?: string): void }
 ```
 `reload()` = tear down guest world entities, `registerComponentTypes` (reserved = built-ins), rebuild prefab registry, instantiate active scene (`type` defaults + `overrides`; unknown component names preserved in doc + returned as problems). All edits go through `session.mutate` (dirty + undo for free).
 
