@@ -45,12 +45,23 @@ import {
   type EditorPanelId,
 } from './components.js'
 import { createDomecsStudioPlugin, createStudioPluginBridge, type StudioPluginBridge } from './plugin.js'
+import { createCatalog, type Catalog } from './catalog.js'
+import { createMemoryProjectStore, createProjectSession, type EntityTypeData, type ProjectSession } from './project.js'
 
 export interface StudioOptions extends WorldOptions {
   guestWorld?: World
   guestTitle?: string
   guestEntityCount?: number
   ringCapacity?: number
+  /**
+   * Supply an existing project (component/entity-type catalog + scene) to
+   * drive the guest world from. When omitted, `createDomecsStudio` builds a
+   * default in-memory project whose entityTypes reproduce the historical
+   * built-in prefabs (`prop.crate` / `enemy.spark` / `trigger.door`) and
+   * whose scene captures whatever is already live in `guestWorld` at
+   * startup, so omitting this option preserves prior zero-arg behavior.
+   */
+  projectSession?: ProjectSession
 }
 
 export interface StudioRefs {
@@ -61,6 +72,7 @@ export interface StudioRefs {
   scrubberId: Entity
   sceneDocumentId: Entity
   bridge: StudioPluginBridge
+  catalog: Catalog
   projectionEntityIds: Entity[]
   select(guestEntityId: Entity | null): void
   hover(guestEntityId: Entity | null): void
@@ -98,13 +110,6 @@ export interface EntityInspection {
   components: ComponentInspection[]
 }
 
-interface PrefabDefinition {
-  prefabId: string
-  name: string
-  componentNames: string[]
-  create(x: number, y: number): ComponentEntry<any>[]
-}
-
 const PANEL_ORDER: Array<{ panel: EditorPanelId; title: string }> = [
   { panel: 'entity-tree', title: 'Entities' },
   { panel: 'inspector', title: 'Inspector' },
@@ -114,45 +119,68 @@ const PANEL_ORDER: Array<{ panel: EditorPanelId; title: string }> = [
   { panel: 'viewport', title: 'Guest Viewport' },
 ]
 
-const PREFABS: PrefabDefinition[] = [
+// Built-in guest component types the catalog needs resolvable by name before
+// any live entity uses them (e.g. GuestPrefabSource, which historically only
+// registered once a prefab was first instantiated). Force-registering them
+// up front via World.has() lets entityType/scene component references
+// resolve immediately, regardless of what's currently live in the world.
+const RESERVED_GUEST_COMPONENT_TYPES: ComponentType<unknown>[] = [
+  GuestName,
+  GuestTransform,
+  GuestSprite,
+  GuestHealth,
+  GuestScript,
+  GuestPrefabSource,
+  GuestDebugProbe,
+  GuestRenderable,
+]
+
+// entityTypes reproducing the historical prop.crate / enemy.spark /
+// trigger.door prefabs exactly (same names/components/defaults), so a
+// zero-arg createDomecsStudio() keeps behaving identically to the old
+// hardcoded PREFABS array. entityType.name doubles as the prefabId that
+// StudioRefs.applyPrefab()/catalog.spawnFromType() take.
+const DEFAULT_ENTITY_TYPES: EntityTypeData[] = [
   {
-    prefabId: 'prop.crate',
-    name: 'Crate',
-    componentNames: ['GuestName', 'GuestTransform', 'GuestSprite', 'GuestPrefabSource', 'GuestRenderable'],
-    create: (x, y) => [
-      entry(GuestName, { value: 'Crate' }),
-      entry(GuestTransform, { x, y, rotation: 0, scale: 1 }),
-      entry(GuestSprite, { kind: 'prop', tint: '#b88958', visible: true }),
-      entry(GuestPrefabSource, { prefabId: 'prop.crate', label: 'Crate' }),
-      entry(GuestRenderable, { slot: 'stage', layer: 2 }),
-    ],
+    name: 'prop.crate',
+    components: {
+      GuestName: { value: 'Crate' },
+      GuestTransform: { x: 0, y: 0, rotation: 0, scale: 1 },
+      GuestSprite: { kind: 'prop', tint: '#b88958', visible: true },
+      GuestPrefabSource: { prefabId: 'prop.crate', label: 'Crate' },
+      GuestRenderable: { slot: 'stage', layer: 2 },
+    },
   },
   {
-    prefabId: 'enemy.spark',
-    name: 'Spark Enemy',
-    componentNames: ['GuestName', 'GuestTransform', 'GuestSprite', 'GuestHealth', 'GuestScript', 'GuestRenderable'],
-    create: (x, y) => [
-      entry(GuestName, { value: 'Spark Enemy' }),
-      entry(GuestTransform, { x, y, rotation: 0, scale: 1 }),
-      entry(GuestSprite, { kind: 'enemy', tint: '#ff6b7a', visible: true }),
-      entry(GuestHealth, { hp: 6, max: 6 }),
-      entry(GuestScript, { event: 'OnTick', action: 'Patrol', enabled: true }),
-      entry(GuestRenderable, { slot: 'stage', layer: 3 }),
-    ],
+    name: 'enemy.spark',
+    components: {
+      GuestName: { value: 'Spark Enemy' },
+      GuestTransform: { x: 0, y: 0, rotation: 0, scale: 1 },
+      GuestSprite: { kind: 'enemy', tint: '#ff6b7a', visible: true },
+      GuestHealth: { hp: 6, max: 6 },
+      GuestScript: { event: 'OnTick', action: 'Patrol', enabled: true },
+      GuestRenderable: { slot: 'stage', layer: 3 },
+    },
   },
   {
-    prefabId: 'trigger.door',
-    name: 'Door Trigger',
-    componentNames: ['GuestName', 'GuestTransform', 'GuestSprite', 'GuestScript', 'GuestRenderable'],
-    create: (x, y) => [
-      entry(GuestName, { value: 'Door Trigger' }),
-      entry(GuestTransform, { x, y, rotation: 0, scale: 1 }),
-      entry(GuestSprite, { kind: 'trigger', tint: '#8ee88e', visible: true }),
-      entry(GuestScript, { event: 'OnEnter', action: 'OpenDoor', enabled: true }),
-      entry(GuestRenderable, { slot: 'stage', layer: 4 }),
-    ],
+    name: 'trigger.door',
+    components: {
+      GuestName: { value: 'Door Trigger' },
+      GuestTransform: { x: 0, y: 0, rotation: 0, scale: 1 },
+      GuestSprite: { kind: 'trigger', tint: '#8ee88e', visible: true },
+      GuestScript: { event: 'OnEnter', action: 'OpenDoor', enabled: true },
+      GuestRenderable: { slot: 'stage', layer: 4 },
+    },
   },
 ]
+
+function createDefaultProjectSession(): ProjectSession {
+  const session = createProjectSession(createMemoryProjectStore())
+  session.mutate((doc) => {
+    for (const entityType of DEFAULT_ENTITY_TYPES) doc.entityTypes.push(entityType)
+  })
+  return session
+}
 
 export function createDemoGuestWorld(options: { seed?: WorldOptions['seed']; headless?: boolean; entityCount?: number } = {}): World {
   const world = createWorld({ seed: options.seed ?? 7, headless: options.headless !== false })
@@ -199,6 +227,26 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
   const ringCapacity = options.ringCapacity ?? 3600
   const bridge = createStudioPluginBridge()
 
+  // Force-register every built-in guest component type before the catalog
+  // touches this world, so entityType/scene component references resolve by
+  // name even before any live entity uses them (World.has() registers a type
+  // without requiring an alive entity or an existing component value).
+  for (const type of RESERVED_GUEST_COMPONENT_TYPES) guestWorld.has(-1, type)
+
+  const usingDefaultProject = options.projectSession === undefined
+  const projectSession = options.projectSession ?? createDefaultProjectSession()
+  const catalog = createCatalog(projectSession, guestWorld)
+  if (usingDefaultProject) {
+    // No project supplied: whatever's already live in guestWorld (the demo
+    // content just created above, or a caller-supplied guestWorld) becomes
+    // the default project's starting scene, so reload() below reproduces it
+    // instead of wiping it out. Done BEFORE the studio plugin is installed so
+    // its onSnapshot redaction hook (which strips GuestDebugProbe) does not
+    // apply to this internal round-trip.
+    catalog.captureScene()
+  }
+  catalog.reload()
+
   guestWorld.use(createDomecsStudioPlugin(bridge))
 
   // Created AFTER use(plugin) so the initial checkpoint flows through the
@@ -208,9 +256,9 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
   bridge.history = history
   bridge.snapshotsCaptured += 1
 
-  // name -> ComponentType, cached from the guest world's registry. Component
-  // types register lazily on first use, so refresh the cache on a miss (e.g.
-  // GuestPrefabSource only registers once a prefab is first instantiated).
+  // name -> ComponentType, cached from the guest world's registry. Used by
+  // the field-editor system below to resolve an arbitrary component name
+  // (from an EditComponentFieldEvent) back to its live ComponentType.
   const componentTypeByName = new Map<string, ComponentType<unknown>>()
   const resolveComponentType = (name: string): ComponentType<unknown> | undefined => {
     if (!componentTypeByName.has(name)) {
@@ -242,8 +290,16 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
   for (const role of ['selected', 'hovered', 'highlight'] as const) {
     editorWorld.spawn([entry(GuestReference, { role, guestEntityId: null })])
   }
-  for (const prefab of PREFABS) {
-    editorWorld.spawn([entry(PrefabAsset, { prefabId: prefab.prefabId, name: prefab.name, componentNames: prefab.componentNames, lastInstantiatedGuestId: null })])
+  for (const entityType of catalog.entityTypes()) {
+    const displayName = (entityType.components.GuestName?.value as string | undefined) ?? entityType.name
+    editorWorld.spawn([
+      entry(PrefabAsset, {
+        prefabId: entityType.name,
+        name: displayName,
+        componentNames: Object.keys(entityType.components),
+        lastInstantiatedGuestId: null,
+      }),
+    ])
   }
   for (let i = 0; i < 150; i++) {
     editorWorld.spawn([entry(ViewProjection, { slot: 'chrome', key: `chrome-widget-${i}`, guestEntityId: null, visible: true, z: i })])
@@ -257,6 +313,7 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
     scrubberId,
     sceneDocumentId,
     bridge,
+    catalog,
     projectionEntityIds: [],
     select(guestEntityId) {
       editorWorld.emit(SelectGuestEntityEvent, { guestEntityId })
@@ -380,9 +437,8 @@ function installEditorSystems(refs: StudioRefs, resolveComponentType: (name: str
 
   editorWorld.system('studio.prefab', { schedule: 'event', triggers: [ApplyPrefabEvent] }, ({ events }) => {
     for (const event of events.of(ApplyPrefabEvent)) {
-      const prefab = PREFABS.find((candidate) => candidate.prefabId === event.prefabId)
-      if (!prefab) continue
-      const id = guestWorld.spawn(prefab.create(event.x ?? 0, event.y ?? 0))
+      const id = refs.catalog.spawnFromType(event.prefabId, event.x ?? 0, event.y ?? 0)
+      if (id === null) continue
       for (const { id: editorId, value } of editorWorld.iterEntitiesWith(PrefabAsset)) {
         if (value.prefabId !== event.prefabId) continue
         value.lastInstantiatedGuestId = id
