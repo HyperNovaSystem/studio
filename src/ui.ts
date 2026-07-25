@@ -6,6 +6,7 @@ import { createUiState, type UiState } from './panels/state.js'
 import type { PanelContext } from './panels/context.js'
 import { handleToolbarClick, renderToolbar } from './panels/toolbar.js'
 import { renderProblems } from './panels/problems.js'
+import { handleComponentTypesChange, handleComponentTypesClick, renderComponentTypesPanel } from './panels/componentTypes.js'
 
 export interface StudioUi {
   /** Re-render, writing to the DOM only when the markup actually changed. */
@@ -58,6 +59,7 @@ export function renderStudioHtml(studio: StudioRefs, ui: UiState = createUiState
         <p>${scrubber.length}/${scrubber.capacity} snapshots · checkpoint ${scrubber.cursor + 1}/${scrubber.length}</p>
         <input type="range" min="0" max="${Math.max(0, scrubber.length - 1)}" value="${scrubber.cursor}" data-scrub>
       </section>
+      ${renderComponentTypesPanel(ctx)}
     </main>
   `
 }
@@ -89,6 +91,7 @@ export function mountStudio(app: HTMLElement, studio: StudioRefs): StudioUi {
     const play = target.closest<HTMLElement>('[data-play]')
     if (play) studio.setPlayback(play.dataset.play as 'paused' | 'playing')
     handleToolbarClick(target, ctx)
+    handleComponentTypesClick(target, ctx)
     render()
   })
 
@@ -99,6 +102,7 @@ export function mountStudio(app: HTMLElement, studio: StudioRefs): StudioUi {
       studio.editField(Number(id), component!, field!, target.value)
     }
     if (target.dataset.scrub !== undefined) studio.scrub(Number(target.value))
+    handleComponentTypesChange(target, ctx)
     render()
   })
 
@@ -106,13 +110,20 @@ export function mountStudio(app: HTMLElement, studio: StudioRefs): StudioUi {
   return { render }
 }
 
+// Generalized over every `[data-x]`-tagged input/textarea/select this module
+// or a panel renders, rather than a hardcoded list of tracked attributes: any
+// element with exactly one dataset entry (the convention every control here
+// follows) can be re-found by rebuilding its `[data-x="value"]` selector.
+// New panel controls get focus-restore for free without touching this file.
 function focusedKey(app: HTMLElement): string | null {
   const active = app.ownerDocument?.activeElement as HTMLElement | null
   if (!active || !app.contains(active)) return null
-  const edit = active.dataset?.edit
-  if (edit) return `[data-edit="${edit}"]`
-  if (active.dataset?.scrub !== undefined) return '[data-scrub]'
-  return null
+  const dataset = active.dataset
+  if (!dataset) return null
+  const key = Object.keys(dataset)[0]
+  if (key === undefined) return null
+  const attr = key.replace(/[A-Z]/g, (m) => `-${m.toLowerCase()}`)
+  return `[data-${attr}="${dataset[key] ?? ''}"]`
 }
 
 function restoreFocus(app: HTMLElement, selector: string): void {

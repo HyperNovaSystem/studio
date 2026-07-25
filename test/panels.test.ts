@@ -177,3 +177,92 @@ describe('problems strip', () => {
     expect(session.problems.length).toBeGreaterThan(0)
   })
 })
+
+describe('component types panel', () => {
+  function setup() {
+    const studio = createDomecsStudio({ headless: true, ringCapacity: 8 })
+    const host = fakeHost()
+    mountStudio(host.element, studio)
+    return { studio, host }
+  }
+
+  it('adding a new component type: typing a name then clicking Add creates it via the catalog', () => {
+    const { studio, host } = setup()
+
+    host.dispatch('change', { target: fakeElement({ data: { 'new-component-type-name': '' }, value: 'Health' }) })
+    host.dispatch('click', { target: fakeElement({ data: { 'add-component-type': '' } }) })
+
+    expect(studio.projectSession.doc.componentTypes.map((c) => c.name)).toContain('Health')
+    expect(host.html()).toContain('data-rename-component-type="Health"')
+  })
+
+  it('renaming a component type re-keys entityType references and drops the old name', () => {
+    const { studio, host } = setup()
+    studio.catalog.upsertComponentType({ name: 'Old', fields: [{ name: 'x', kind: 'number' }] })
+    studio.catalog.upsertEntityType({ name: 'thing', components: { Old: { x: 1 } } })
+
+    host.dispatch('change', { target: fakeElement({ data: { 'rename-component-type': 'Old' }, value: 'New' }) })
+
+    expect(studio.projectSession.doc.componentTypes.map((c) => c.name)).not.toContain('Old')
+    expect(studio.projectSession.doc.componentTypes.map((c) => c.name)).toContain('New')
+    const thing = studio.projectSession.doc.entityTypes.find((et) => et.name === 'thing')!
+    expect(thing.components).toEqual({ New: { x: 1 } })
+  })
+
+  it('adding a field: draft name + kind, then Add field, appends the field via upsertComponentType', () => {
+    const { studio, host } = setup()
+    studio.catalog.upsertComponentType({ name: 'Health', fields: [] })
+
+    host.dispatch('change', { target: fakeElement({ data: { 'new-field-name': 'Health' }, value: 'hp' }) })
+    host.dispatch('change', { target: fakeElement({ data: { 'new-field-kind': 'Health' }, value: 'number' }) })
+    host.dispatch('click', { target: fakeElement({ data: { 'add-field': 'Health' } }) })
+
+    const type = studio.projectSession.doc.componentTypes.find((c) => c.name === 'Health')!
+    expect(type.fields).toEqual([{ name: 'hp', kind: 'number' }])
+  })
+
+  it('retyping a field updates its kind in place', () => {
+    const { studio, host } = setup()
+    studio.catalog.upsertComponentType({ name: 'Health', fields: [{ name: 'hp', kind: 'number' }] })
+
+    host.dispatch('change', { target: fakeElement({ data: { 'retype-field': 'Health:hp' }, value: 'string' }) })
+
+    const type = studio.projectSession.doc.componentTypes.find((c) => c.name === 'Health')!
+    expect(type.fields[0]!.kind).toBe('string')
+  })
+
+  it('removing a field drops it from the type', () => {
+    const { studio, host } = setup()
+    studio.catalog.upsertComponentType({ name: 'Health', fields: [{ name: 'hp', kind: 'number' }] })
+
+    host.dispatch('click', { target: fakeElement({ data: { 'remove-field': 'Health:hp' } }) })
+
+    const type = studio.projectSession.doc.componentTypes.find((c) => c.name === 'Health')!
+    expect(type.fields).toEqual([])
+  })
+
+  it('deleting an in-use type is two-step: first click shows usage count, second click confirms delete', () => {
+    const { studio, host } = setup()
+    studio.catalog.upsertComponentType({ name: 'Tag', fields: [{ name: 'label', kind: 'string' }] })
+    studio.catalog.upsertEntityType({ name: 'thing', components: { Tag: { label: 'x' } } })
+
+    host.dispatch('click', { target: fakeElement({ data: { 'delete-component-type': 'Tag' } }) })
+    expect(studio.projectSession.doc.componentTypes.map((c) => c.name)).toContain('Tag')
+    expect(host.html()).toContain('used by 1 entity type')
+    expect(host.html()).toContain('data-confirm-delete-component-type="Tag"')
+
+    host.dispatch('click', { target: fakeElement({ data: { 'confirm-delete-component-type': 'Tag' } }) })
+    expect(studio.projectSession.doc.componentTypes.map((c) => c.name)).not.toContain('Tag')
+  })
+
+  it('canceling a pending delete leaves the type intact', () => {
+    const { studio, host } = setup()
+    studio.catalog.upsertComponentType({ name: 'Tag', fields: [] })
+
+    host.dispatch('click', { target: fakeElement({ data: { 'delete-component-type': 'Tag' } }) })
+    host.dispatch('click', { target: fakeElement({ data: { 'cancel-delete-component-type': 'Tag' } }) })
+
+    expect(studio.projectSession.doc.componentTypes.map((c) => c.name)).toContain('Tag')
+    expect(host.html()).not.toContain('data-confirm-delete-component-type')
+  })
+})
