@@ -178,6 +178,17 @@ describe('problems strip', () => {
     expect(host.html()).toContain('Nonexistent')
     expect(session.problems.length).toBeGreaterThan(0)
   })
+
+  it('surfaces @domecs/rules compile errors for an unresolvable system, keyed by system name', () => {
+    const studio = createDomecsStudio({ headless: true, ringCapacity: 8 })
+    studio.projectSession.mutate((doc) => {
+      doc.systems.push({ name: 'broken-rule', schedule: 'tick', query: ['Nonexistent'], actions: [{ set: 'Nonexistent.x', expr: '1' }] })
+    })
+    studio.sync()
+
+    expect(studio.ruleErrors().has('broken-rule')).toBe(true)
+    expect(renderStudioHtml(studio)).toContain('broken-rule')
+  })
 })
 
 describe('component types panel', () => {

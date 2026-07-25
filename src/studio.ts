@@ -12,6 +12,7 @@ import {
   type WorldSnapshot,
 } from '@domecs/core'
 import { createSnapshotHistory, diffSnapshots, type SnapshotDiff } from '@domecs/persist'
+import { installRules, type RuleError, type RulesHandle } from '@domecs/rules'
 import { ancestorsOf, composeTransforms, installHierarchy } from '@domecs/scene'
 import {
   ApplyPrefabEvent,
@@ -100,6 +101,15 @@ export interface StudioRefs {
    * defensive copy, so do not call this per frame.
    */
   timelineDiffs(): SnapshotDiff[]
+  /**
+   * Compile errors from the most recently applied @domecs/rules pass,
+   * keyed by system/rule name — refreshed by `sync()`. A system present in
+   * `projectSession.doc.systems` but absent from this map compiled clean and
+   * is installed/running; one present here failed to compile (per
+   * `RulesHandle.update`'s documented contract, any previous installation of
+   * that same name was already uninstalled).
+   */
+  ruleErrors(): Map<string, RuleError[]>
 }
 
 export interface ComponentInspection {
@@ -251,6 +261,26 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
   }
   catalog.reload()
 
+  // Data-defined systems (M7): compile+install every projectSession.doc.systems
+  // entry as a live @domecs/rules RulesHandle against guestWorld, resolving
+  // Component names through catalog.resolveComponentType (the same map
+  // reload() maintains — no second resolution mechanism). Constructed with an
+  // empty rule set so the one real compile pass (and the errors Map it
+  // produces) happens through applyRules() below exactly once, rather than
+  // once inside installRules() itself (whose initial update() result would
+  // otherwise be discarded) and again immediately after just to capture it.
+  const rulesHandle: RulesHandle = installRules(guestWorld, [], catalog.resolveComponentType)
+  let ruleErrors = new Map<string, RuleError[]>()
+  // Re-applied by refs.sync() — called after every catalog reload (project
+  // New/Open/Save/SaveAs, and every catalog CRUD mutation, which already call
+  // syncAndRender -> studio.sync()) AND after every systems-panel edit (see
+  // panels/systems.ts, which now calls syncAndRender for the same reason),
+  // so an edited rule takes effect on the guest world's next tick either way.
+  function applyRules(): void {
+    ruleErrors = rulesHandle.update(projectSession.doc.systems)
+  }
+  applyRules()
+
   guestWorld.use(createDomecsStudioPlugin(bridge))
   guestWorld.use(installHierarchy())
   guestWorld.use(
@@ -370,6 +400,7 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
       return guestWorld.snapshot()
     },
     sync() {
+      applyRules()
       syncEditorProjection(refs)
     },
     reflectedSchemas() {
@@ -392,6 +423,9 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
       const diffs: SnapshotDiff[] = []
       for (let i = 1; i < snapshots.length; i++) diffs.push(diffSnapshots(snapshots[i - 1]!, snapshots[i]!))
       return diffs
+    },
+    ruleErrors() {
+      return ruleErrors
     },
   }
 

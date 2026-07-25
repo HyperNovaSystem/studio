@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { Has, entry } from '@domecs/core'
+import { Has, entry, type ComponentType } from '@domecs/core'
 import { setParent } from '@domecs/scene'
+import { createMemoryProjectStore, createProjectSession } from '../src/project.js'
 import {
   ComponentInspector,
   EditorPanel,
@@ -177,6 +178,47 @@ describe('DOMECS Studio exemplar', () => {
     const playback = studio.editorWorld.getComponent(studio.playbackId, PlaybackState)!
     expect(playback.stepCount).toBeGreaterThanOrEqual(4)
     expect(studio.guestWorld.time.tick).toBeGreaterThan(beforeGuestTick + 3)
+  })
+
+  it('installs @domecs/rules against projectSession.doc.systems at construction, running them on the guest world every tick', () => {
+    const store = createMemoryProjectStore()
+    const session = createProjectSession(store)
+    session.mutate((doc) => {
+      doc.componentTypes.push({ name: 'Counter', fields: [{ name: 'value', kind: 'number', default: 0 }] })
+      doc.entityTypes.push({ name: 'counter', components: { Counter: { value: 0 } } })
+      doc.systems.push({
+        name: 'increment',
+        schedule: 'tick',
+        query: ['Counter'],
+        actions: [{ set: 'Counter.value', expr: 'Counter.value + 1' }],
+      })
+    })
+    const studio = createDomecsStudio({ headless: true, ringCapacity: 8, projectSession: session })
+    const id = studio.catalog.spawnFromType('counter', 0, 0)!
+    const counterType = studio.guestWorld.componentTypes().find((t) => t.name === 'Counter') as unknown as ComponentType<{ value: number }>
+
+    expect(studio.guestWorld.getComponent(id, counterType)?.value).toBe(0)
+    studio.guestWorld.step(1 / 60)
+    expect(studio.guestWorld.getComponent(id, counterType)?.value).toBe(1)
+    studio.guestWorld.step(1 / 60)
+    expect(studio.guestWorld.getComponent(id, counterType)?.value).toBe(2)
+  })
+
+  it('exposes rule compile errors via ruleErrors(), keyed by system name, for an unresolvable component reference', () => {
+    const store = createMemoryProjectStore()
+    const session = createProjectSession(store)
+    session.mutate((doc) => {
+      doc.systems.push({
+        name: 'broken',
+        schedule: 'tick',
+        query: ['Nonexistent'],
+        actions: [{ set: 'Nonexistent.x', expr: '1' }],
+      })
+    })
+    const studio = createDomecsStudio({ headless: true, ringCapacity: 8, projectSession: session })
+
+    expect(studio.ruleErrors().has('broken')).toBe(true)
+    expect(studio.ruleErrors().get('broken')![0]!.message).toContain('Nonexistent')
   })
 
   it('composes WorldTransform down the guest Parent hierarchy from GuestTransform', () => {
