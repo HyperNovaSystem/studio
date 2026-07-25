@@ -244,6 +244,23 @@ describe('createCatalog', () => {
     expect(guestWorld.getComponent(leafId2!, Parent)?.entity).toBe(midId2)
   })
 
+  it('resolveComponentType round-trips to the same live ComponentType reload() resolves internally, and returns undefined for an unknown name', () => {
+    const guestWorld = createWorld({ headless: true })
+    const session = createProjectSession(createMemoryProjectStore())
+    session.mutate((doc) => {
+      doc.componentTypes.push({ name: 'Tag', fields: [{ name: 'label', kind: 'string' }] })
+    })
+    const catalog = createCatalog(session, guestWorld)
+    catalog.reload()
+
+    const resolved = catalog.resolveComponentType('Tag')
+    expect(resolved).toBeDefined()
+    const liveType = guestWorld.componentTypes().find((t) => t.name === 'Tag')!
+    expect(resolved).toBe(liveType)
+
+    expect(catalog.resolveComponentType('Nonexistent')).toBeUndefined()
+  })
+
   it('reload() rejects a cycle hand-authored into a project file as a SchemaProblem, leaving that entity parentless, rather than throwing', () => {
     const guestWorld = createWorld({ headless: true })
     const session = createProjectSession(createMemoryProjectStore())

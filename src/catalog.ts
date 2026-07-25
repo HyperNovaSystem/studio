@@ -57,6 +57,14 @@ export interface Catalog {
   deleteEntityType(name: string, mode: 'strip' | 'despawn'): void
   /** Snapshots the live guest world back into `session.doc.scenes[0]` (or a scene matched by `name`). */
   captureScene(name?: string): void
+  /**
+   * Resolve a component name to its live `ComponentType`, via the exact same
+   * `componentTypeByName` map `reload()` maintains internally (built-ins +
+   * registered custom types) — no second resolution mechanism. Returns
+   * `undefined` for a name reload() has never registered. This is the
+   * resolver `@domecs/rules`'s `installRules`/`compileRule` need.
+   */
+  resolveComponentType(name: string): ComponentType<unknown> | undefined
 }
 
 function deepEqual(a: unknown, b: unknown): boolean {
@@ -265,6 +273,10 @@ export function createCatalog(session: ProjectSession, guestWorld: World): Catal
     reload()
   }
 
+  function resolveComponentType(name: string): ComponentType<unknown> | undefined {
+    return componentTypeByName.get(name)
+  }
+
   function captureScene(name?: string): void {
     const snapshot = guestWorld.snapshot()
     // This capture's doc-local id space: array index in snapshot.entities'
@@ -316,5 +328,6 @@ export function createCatalog(session: ProjectSession, guestWorld: World): Catal
     upsertEntityType,
     deleteEntityType,
     captureScene,
+    resolveComponentType,
   }
 }
