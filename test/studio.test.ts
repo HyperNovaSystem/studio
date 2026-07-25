@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { Has } from '@domecs/core'
+import { Has, entry } from '@domecs/core'
+import { setParent } from '@domecs/scene'
 import {
   ComponentInspector,
   EditorPanel,
@@ -17,6 +18,7 @@ import {
   TimeTravelScrubber,
   ViewProjection,
   VisualScriptBinding,
+  WorldTransform,
   createDemoGuestWorld,
   createDomecsStudio,
 } from '../src/index.js'
@@ -175,5 +177,19 @@ describe('DOMECS Studio exemplar', () => {
     const playback = studio.editorWorld.getComponent(studio.playbackId, PlaybackState)!
     expect(playback.stepCount).toBeGreaterThanOrEqual(4)
     expect(studio.guestWorld.time.tick).toBeGreaterThan(beforeGuestTick + 3)
+  })
+
+  it('composes WorldTransform down the guest Parent hierarchy from GuestTransform', () => {
+    const studio = createDomecsStudio({ seed: 41, headless: true, guestEntityCount: 0 })
+    const parentId = studio.guestWorld.spawn([entry(GuestTransform, { x: 10, y: 5, rotation: 15, scale: 2 })])
+    const childId = studio.guestWorld.spawn([entry(GuestTransform, { x: 1, y: 1, rotation: 5, scale: 1.5 })])
+
+    const result = setParent(studio.guestWorld, childId, parentId)
+    expect(result.ok).toBe(true)
+
+    studio.guestWorld.step(1 / 60)
+
+    expect(studio.guestWorld.getComponent(parentId, WorldTransform)).toEqual({ x: 10, y: 5, rotation: 15, scale: 2 })
+    expect(studio.guestWorld.getComponent(childId, WorldTransform)).toEqual({ x: 11, y: 6, rotation: 20, scale: 3 })
   })
 })

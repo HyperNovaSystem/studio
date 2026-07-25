@@ -12,6 +12,7 @@ import {
   type WorldSnapshot,
 } from '@domecs/core'
 import { createSnapshotHistory, diffSnapshots, type SnapshotDiff } from '@domecs/persist'
+import { ancestorsOf, composeTransforms, installHierarchy } from '@domecs/scene'
 import {
   ApplyPrefabEvent,
   ComponentInspector,
@@ -42,6 +43,7 @@ import {
   TimeTravelScrubber,
   ViewProjection,
   VisualScriptBinding,
+  WorldTransform,
   type EditorPanelId,
 } from './components.js'
 import { createDomecsStudioPlugin, createStudioPluginBridge, type StudioPluginBridge } from './plugin.js'
@@ -250,6 +252,19 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
   catalog.reload()
 
   guestWorld.use(createDomecsStudioPlugin(bridge))
+  guestWorld.use(installHierarchy())
+  guestWorld.use(
+    composeTransforms(GuestTransform, WorldTransform, (parentWorld, local) =>
+      parentWorld
+        ? {
+            x: parentWorld.x + local.x,
+            y: parentWorld.y + local.y,
+            rotation: parentWorld.rotation + local.rotation,
+            scale: parentWorld.scale * local.scale,
+          }
+        : { ...local },
+    ),
+  )
 
   // Created AFTER use(plugin) so the initial checkpoint flows through the
   // plugin's onSnapshot redaction hook. Engine default limit is 50 — pass the
@@ -534,7 +549,7 @@ function syncEditorProjection(refs: StudioRefs): void {
       entry(EntityTreeNode, {
         guestEntityId: entity.id,
         label: name,
-        depth: 0,
+        depth: ancestorsOf(guestWorld, entity.id).length,
         componentCount: Object.keys(entity.components).length,
         selected: entity.id === selected,
         hovered: entity.id === playback.hoveredGuestEntity,

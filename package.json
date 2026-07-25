@@ -20,7 +20,8 @@
   "dependencies": {
     "@domecs/core": "^1.0.0",
     "@domecs/dom": "^1.0.0",
-    "@domecs/persist": "^1.0.0"
+    "@domecs/persist": "^1.0.0",
+    "@domecs/scene": "^1.0.0"
   },
   "devDependencies": {
     "@types/node": "^26.1.1",

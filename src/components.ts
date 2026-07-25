@@ -185,6 +185,22 @@ export const GuestTransform = defineComponent<{
   },
 })
 
+// Fully derived from GuestTransform + the guest Parent chain every tick (see
+// @domecs/scene's composeTransforms, installed onto guestWorld in
+// createDomecsStudio) — never authored directly and never round-tripped
+// through save/load, same reasoning as this file's other transient
+// components (EntityTreeNode, GuestReference, ...): a stale/hand-authored
+// value here would silently fight the system that recomputes it every tick.
+export const WorldTransform = defineComponent<{
+  x: number
+  y: number
+  rotation: number
+  scale: number
+}>('WorldTransform', {
+  defaults: { x: 0, y: 0, rotation: 0, scale: 1 },
+  transient: true,
+})
+
 export const GuestSprite = defineComponent<{
   kind: 'hero' | 'prop' | 'enemy' | 'trigger'
   tint: string

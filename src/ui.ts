@@ -1,6 +1,6 @@
 import { Has } from '@domecs/core'
 import type { EntityView } from '@domecs/core'
-import { ComponentInspector, GuestSprite, GuestTransform, InspectorField, PlaybackState, StudioRoot, TimeTravelScrubber } from './components.js'
+import { ComponentInspector, GuestSprite, GuestTransform, InspectorField, PlaybackState, StudioRoot, TimeTravelScrubber, WorldTransform } from './components.js'
 import type { StudioRefs } from './studio.js'
 import { createUiState, type UiState } from './panels/state.js'
 import type { PanelContext } from './panels/context.js'
@@ -37,7 +37,17 @@ export function renderStudioHtml(studio: StudioRefs, ui: UiState = createUiState
         <h2>Guest Viewport</h2>
         <div class="stage">
           ${studio.guestWorld.snapshot().entities.map((entity) => {
-            const transform = studio.guestWorld.getComponent(entity.id, GuestTransform)
+            // Render-ready value: composed down the guest Parent chain every
+            // tick by @domecs/scene's composeTransforms (see studio.ts), not
+            // the entity's own local GuestTransform. composeTransforms only
+            // runs on the 'tick' schedule, so a just-spawned/just-loaded
+            // entity has no WorldTransform yet until the guest world's next
+            // step — fall back to the local GuestTransform then rather than
+            // rendering nothing (exactly right for a root entity, since
+            // composeTransforms' own compose() reduces to local when
+            // parentWorld is null; only briefly approximate for an
+            // already-parented entity, self-healing on the next tick).
+            const transform = studio.guestWorld.getComponent(entity.id, WorldTransform) ?? studio.guestWorld.getComponent(entity.id, GuestTransform)
             const sprite = studio.guestWorld.getComponent(entity.id, GuestSprite)
             if (!transform || !sprite?.visible) return ''
             return `<div class="sprite ${sprite.kind}" style="--x:${transform.x}px;--y:${transform.y}px;--r:${transform.rotation}deg;--tint:${sprite.tint}"></div>`
