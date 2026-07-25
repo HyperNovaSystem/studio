@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { Has, createWorld, defineComponent, entry } from '@domecs/core'
+import { Parent, childrenOf } from '@domecs/scene'
 import { createCatalog } from '../src/catalog.js'
 import { createMemoryProjectStore, createProjectSession } from '../src/project.js'
 
@@ -194,5 +195,78 @@ describe('createCatalog', () => {
     expect(matched?.overrides).toEqual({})
     const bare = scene.entities.find((e) => e.type === null)
     expect(bare?.overrides.Tag).toEqual({ label: 'Custom' })
+  })
+
+  it('reload() materializes a Parent chain from doc-local indices, and captureScene() regenerates the same relationships even though live entity ids differ', () => {
+    const guestWorld = createWorld({ headless: true })
+    guestWorld.has(-1, GuestTransform) // prime, mirrors createDomecsStudio priming built-ins
+    const session = createProjectSession(createMemoryProjectStore())
+    session.mutate((doc) => {
+      doc.scenes[0]!.entities.push(
+        { id: 0, type: null, parent: null, overrides: { GuestTransform: { x: 0, y: 0 } } },
+        { id: 1, type: null, parent: 0, overrides: { GuestTransform: { x: 1, y: 1 } } },
+        { id: 2, type: null, parent: 1, overrides: { GuestTransform: { x: 2, y: 2 } } },
+      )
+    })
+    const catalog = createCatalog(session, guestWorld)
+    const problems = catalog.reload()
+    expect(problems).toEqual([])
+
+    const liveEntities = guestWorld.snapshot().entities
+    expect(liveEntities).toHaveLength(3)
+    const [rootId, midId, leafId] = liveEntities.map((e) => e.id)
+
+    expect(guestWorld.getComponent(rootId!, Parent)).toBeUndefined()
+    expect(guestWorld.getComponent(midId!, Parent)?.entity).toBe(rootId)
+    expect(guestWorld.getComponent(leafId!, Parent)?.entity).toBe(midId)
+    expect(childrenOf(guestWorld, rootId!)).toEqual([midId])
+    expect(childrenOf(guestWorld, midId!)).toEqual([leafId])
+
+    // Despawn+respawn everything under fresh (necessarily different) live
+    // ids, then re-capture: the doc's regenerated parent/id relationships
+    // must reproduce the same shape, proving they never depended on the
+    // live world's own ever-incrementing Entity numbers.
+    catalog.captureScene()
+    const recaptured = session.doc.scenes[0]!.entities
+    expect(recaptured).toHaveLength(3)
+    expect(recaptured[0]).toMatchObject({ id: 0, parent: null })
+    expect(recaptured[1]).toMatchObject({ id: 1, parent: 0 })
+    expect(recaptured[2]).toMatchObject({ id: 2, parent: 1 })
+    // Parent must never leak into overrides as a raw live-entity reference.
+    expect(recaptured.every((e) => !('Parent' in e.overrides))).toBe(true)
+
+    const reloadProblems = catalog.reload()
+    expect(reloadProblems).toEqual([])
+    const liveEntitiesAfterRoundTrip = guestWorld.snapshot().entities
+    expect(liveEntitiesAfterRoundTrip.map((e) => e.id)).not.toEqual(liveEntities.map((e) => e.id))
+    const [rootId2, midId2, leafId2] = liveEntitiesAfterRoundTrip.map((e) => e.id)
+    expect(guestWorld.getComponent(midId2!, Parent)?.entity).toBe(rootId2)
+    expect(guestWorld.getComponent(leafId2!, Parent)?.entity).toBe(midId2)
+  })
+
+  it('reload() rejects a cycle hand-authored into a project file as a SchemaProblem, leaving that entity parentless, rather than throwing', () => {
+    const guestWorld = createWorld({ headless: true })
+    const session = createProjectSession(createMemoryProjectStore())
+    session.mutate((doc) => {
+      doc.scenes[0]!.entities.push(
+        { id: 0, type: null, parent: 1, overrides: {} },
+        { id: 1, type: null, parent: 0, overrides: {} },
+      )
+    })
+    const catalog = createCatalog(session, guestWorld)
+
+    let problems: ReturnType<typeof catalog.reload> = []
+    expect(() => {
+      problems = catalog.reload()
+    }).not.toThrow()
+
+    expect(problems).toHaveLength(1)
+    expect(problems[0]!.path).toBe('scenes[0].entities[1].parent')
+
+    const liveEntities = guestWorld.snapshot().entities
+    expect(liveEntities).toHaveLength(2)
+    const [firstId, secondId] = liveEntities.map((e) => e.id)
+    expect(guestWorld.getComponent(firstId!, Parent)?.entity).toBe(secondId)
+    expect(guestWorld.getComponent(secondId!, Parent)?.entity ?? null).toBeNull()
   })
 })

@@ -7,6 +7,7 @@ import {
   type World,
 } from '@domecs/core'
 import { registerComponentTypes, type ComponentTypeData, type SchemaProblem } from '@domecs/persist'
+import { Parent, setParent } from '@domecs/scene'
 import type { EntityTypeData, ProjectSession, SceneData } from './project.js'
 
 /**
@@ -150,6 +151,15 @@ export function createCatalog(session: ProjectSession, guestWorld: World): Catal
 
     const scene = activeScene()
     if (scene) {
+      // scene.entities' own array index is this scene's doc-local id space
+      // (see captureScene()): stable and self-consistent within one document,
+      // independent of the live world's ever-incrementing Entity ids, which
+      // are reassigned fresh on every reload(). First pass spawns every
+      // entity WITHOUT its Parent (so a forward reference to a not-yet-spawned
+      // parent can never matter), recording docIndex -> the live id it landed
+      // on; second pass resolves each doc-local `parent` index through that
+      // map and applies it via setParent().
+      const docIndexToLiveId = new Map<number, Entity>()
       for (let i = 0; i < scene.entities.length; i++) {
         const sceneEntity = scene.entities[i]!
         let defaults: Record<string, Record<string, unknown>> = {}
@@ -161,7 +171,19 @@ export function createCatalog(session: ProjectSession, guestWorld: World): Catal
             problems.push({ path: `scenes[0].entities[${i}].type`, message: `unknown entity type "${sceneEntity.type}"` })
           }
         }
-        guestWorld.spawn(buildEntries(defaults, sceneEntity.overrides))
+        const liveId = guestWorld.spawn(buildEntries(defaults, sceneEntity.overrides))
+        docIndexToLiveId.set(i, liveId)
+      }
+      for (let i = 0; i < scene.entities.length; i++) {
+        const sceneEntity = scene.entities[i]!
+        if (sceneEntity.parent === null) continue
+        const result = setParent(guestWorld, docIndexToLiveId.get(i)!, docIndexToLiveId.get(sceneEntity.parent) ?? null)
+        if (!result.ok) {
+          // A hand-edited/corrupted project file could contain a cycle;
+          // setParent never throws for one, so mirror that here — report and
+          // leave the entity parentless (root) rather than partially applied.
+          problems.push({ path: `scenes[0].entities[${i}].parent`, message: result.reason })
+        }
       }
     }
 
@@ -245,20 +267,40 @@ export function createCatalog(session: ProjectSession, guestWorld: World): Catal
 
   function captureScene(name?: string): void {
     const snapshot = guestWorld.snapshot()
+    // This capture's doc-local id space: array index in snapshot.entities'
+    // order (see reload(), which mirrors this exactly). liveEntity.id itself
+    // is never stored — it's the live world's own ever-incrementing Entity
+    // number, unstable across reloads, not a document-local identifier.
+    const liveIdToDocIndex = new Map<Entity, number>()
+    snapshot.entities.forEach((liveEntity, i) => liveIdToDocIndex.set(liveEntity.id, i))
+
     session.mutate((doc) => {
       let scene = name !== undefined ? doc.scenes.find((s) => s.name === name) : doc.scenes[0]
       if (!scene) {
         scene = { name: name ?? 'main', entities: [] }
         doc.scenes.push(scene)
       }
-      scene.entities = snapshot.entities.map((liveEntity) => {
+      scene.entities = snapshot.entities.map((liveEntity, i) => {
         const liveComponents = liveEntity.components as Record<string, Record<string, unknown>>
-        const matched = doc.entityTypes.find((et) => sameComponentSet(et.components, liveComponents))
+        // Parent is a live Entity reference, not doc-local-stable data — never
+        // captured as a component override (that would embed a raw live id
+        // that reload() would misinterpret next time round). The hierarchy
+        // relationship is captured separately below, as a doc-local index.
+        const { Parent: _liveParent, ...componentsSansParent } = liveComponents
+        const matched = doc.entityTypes.find((et) => sameComponentSet(et.components, componentsSansParent))
+
+        const parentComponent = guestWorld.getComponent(liveEntity.id, Parent)
+        const parentLiveId = parentComponent?.entity ?? null
+        // A live Parent should always point at another currently-alive
+        // entity in this same snapshot — but never throw if it somehow
+        // doesn't; fall back to root (null) instead.
+        const parentDocIndex = parentLiveId !== null ? (liveIdToDocIndex.get(parentLiveId) ?? null) : null
+
         return {
-          id: liveEntity.id,
+          id: i,
           type: matched ? matched.name : null,
-          parent: null,
-          overrides: matched ? {} : structuredClone(liveComponents),
+          parent: parentDocIndex,
+          overrides: matched ? {} : structuredClone(componentsSansParent),
         }
       })
     })
