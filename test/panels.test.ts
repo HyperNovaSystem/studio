@@ -17,10 +17,58 @@ import { createMemoryProjectStore, createProjectSession, type ProjectDocument } 
 
 interface Listener { (event: unknown): void }
 
+// mountStudio (M8) re-finds the `.stage` placeholder via
+// `app.querySelector('[data-stage-mount]')` after every rewrite and patches
+// sprites into it. This suite doesn't assert anything about stage contents,
+// but `fakeHost`'s `element` still needs a working `querySelector` and a
+// container the returned node can `appendChild`/`removeChild` into, or
+// mountStudio throws. Minimal fake, not jsdom — same shape as
+// test/ui.test.ts's FakeStageElement/FakeStageDocument.
+class FakeStyle {
+  private props = new Map<string, string>()
+  setProperty(name: string, value: string): void { this.props.set(name, value) }
+  getPropertyValue(name: string): string { return this.props.get(name) ?? '' }
+}
+
+class FakeStageElement {
+  className = ''
+  dataset: Record<string, string> = {}
+  children: FakeStageElement[] = []
+  parentNode: FakeStageElement | null = null
+  style = new FakeStyle()
+
+  constructor(public tagName: string, public ownerDocument: FakeStageDocument) {}
+
+  appendChild(child: FakeStageElement): FakeStageElement {
+    child.parentNode = this
+    this.children.push(child)
+    return child
+  }
+
+  removeChild(child: FakeStageElement): FakeStageElement {
+    const index = this.children.indexOf(child)
+    if (index >= 0) this.children.splice(index, 1)
+    child.parentNode = null
+    return child
+  }
+
+  remove(): void {
+    this.parentNode?.removeChild(this)
+  }
+}
+
+class FakeStageDocument {
+  createElement(tagName: string): FakeStageElement {
+    return new FakeStageElement(tagName, this)
+  }
+}
+
 function fakeHost() {
   const listeners = new Map<string, Listener[]>()
   let writes = 0
   let html = ''
+  const doc = new FakeStageDocument()
+  let stageMount: FakeStageElement | null = null
   return {
     writes: () => writes,
     html: () => html,
@@ -29,11 +77,18 @@ function fakeHost() {
     },
     element: {
       get innerHTML() { return html },
-      set innerHTML(next: string) { writes += 1; html = next },
+      set innerHTML(next: string) {
+        writes += 1
+        html = next
+        stageMount = next.includes('data-stage-mount') ? doc.createElement('div') : null
+      },
       addEventListener(type: string, listener: Listener) {
         const bucket = listeners.get(type) ?? []
         bucket.push(listener)
         listeners.set(type, bucket)
+      },
+      querySelector(selector: string) {
+        return selector === '[data-stage-mount]' ? stageMount : null
       },
     } as unknown as HTMLElement,
   }

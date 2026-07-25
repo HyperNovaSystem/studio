@@ -1,7 +1,8 @@
 import { Has } from '@domecs/core'
 import type { EntityView } from '@domecs/core'
-import { ComponentInspector, GuestSprite, GuestTransform, InspectorField, PlaybackState, StudioRoot, TimeTravelScrubber, WorldTransform } from './components.js'
+import { ComponentInspector, InspectorField, PlaybackState, StudioRoot, TimeTravelScrubber } from './components.js'
 import type { StudioRefs } from './studio.js'
+import { mountStage, type StageHandle } from './stage.js'
 import { createUiState, type UiState } from './panels/state.js'
 import type { PanelContext } from './panels/context.js'
 import { handleToolbarClick, renderToolbar } from './panels/toolbar.js'
@@ -14,8 +15,28 @@ import { handleTreeChange, handleTreeClick, handleTreeDragStart, handleTreeDrop,
 export interface StudioUi {
   /** Re-render, writing to the DOM only when the markup actually changed. */
   render(): void
+  /**
+   * Patch the `.stage` sprite subtree, independent of whether render()'s
+   * outer memoized rewrite decided a full rewrite was needed this frame.
+   * The guest world can tick (moving sprites) via paths that don't always
+   * change the outer markup too, so sprite positions must not depend on
+   * that memoized comparison to reach the DOM — call this alongside
+   * render() on every guest-world tick end. See FINDINGS.md, "A
+   * keyed/targeted patch of the .stage subtree...".
+   */
+  patchStage(): void
 }
 
+// Renders `.stage` as an empty `[data-stage-mount]` placeholder only — never
+// sprite markup. Before M8, the `.stage` `<div>` embedded one `<div
+// class="sprite ...">` per visible guest entity directly in this string via
+// `.map().join()`, so any sprite moving (which happens every guest tick)
+// changed mountStudio's memoized comparison and forced a full
+// `app.innerHTML` rewrite, same as any other state change (FINDINGS.md, "A
+// keyed/targeted patch of the .stage subtree would remove the remaining
+// window"). `mountStage` (src/stage.ts) now owns everything inside the
+// placeholder via its own keyed Map<Entity, HTMLElement>, patched by
+// `mountStudio` independently of this function's memoized output.
 export function renderStudioHtml(studio: StudioRefs, ui: UiState = createUiState()): string {
   const ctx: PanelContext = { studio, ui, render: () => {} }
   const root = studio.editorWorld.getComponent(studio.studioId, StudioRoot)!
@@ -35,24 +56,11 @@ export function renderStudioHtml(studio: StudioRefs, ui: UiState = createUiState
       ${renderTreePanel(ctx)}
       <section class="panel viewport">
         <h2>Guest Viewport</h2>
-        <div class="stage">
-          ${studio.guestWorld.snapshot().entities.map((entity) => {
-            // Render-ready value: composed down the guest Parent chain every
-            // tick by @domecs/scene's composeTransforms (see studio.ts), not
-            // the entity's own local GuestTransform. composeTransforms only
-            // runs on the 'tick' schedule, so a just-spawned/just-loaded
-            // entity has no WorldTransform yet until the guest world's next
-            // step — fall back to the local GuestTransform then rather than
-            // rendering nothing (exactly right for a root entity, since
-            // composeTransforms' own compose() reduces to local when
-            // parentWorld is null; only briefly approximate for an
-            // already-parented entity, self-healing on the next tick).
-            const transform = studio.guestWorld.getComponent(entity.id, WorldTransform) ?? studio.guestWorld.getComponent(entity.id, GuestTransform)
-            const sprite = studio.guestWorld.getComponent(entity.id, GuestSprite)
-            if (!transform || !sprite?.visible) return ''
-            return `<div class="sprite ${sprite.kind}" style="--x:${transform.x}px;--y:${transform.y}px;--r:${transform.rotation}deg;--tint:${sprite.tint}"></div>`
-          }).join('')}
-        </div>
+        <!-- Empty on purpose: mountStage (src/stage.ts) owns every sprite
+             element inside this container via a keyed patch, independent of
+             this outer memoized rewrite. Never render sprite markup into
+             this string -- see the comment on renderStudioHtml above. -->
+        <div class="stage" data-stage-mount></div>
         <div class="transport">
           <button data-step="1">Step</button>
           <button data-play="${playback.mode === 'playing' ? 'paused' : 'playing'}">${playback.mode === 'playing' ? 'Pause' : 'Play'}</button>
@@ -78,6 +86,28 @@ export function renderStudioHtml(studio: StudioRefs, ui: UiState = createUiState
 export function mountStudio(app: HTMLElement, studio: StudioRefs): StudioUi {
   let lastHtml: string | null = null
   const ui = createUiState()
+  let stage: StageHandle | null = null
+  let stageMountEl: HTMLElement | null = null
+
+  // Re-find the `.stage` placeholder `renderStudioHtml` renders (always
+  // empty — see the comment on that section). `mountStage`'s internal
+  // Map<Entity, HTMLElement> holds direct references into whatever
+  // container it was given, so if `app.innerHTML = html` replaced that
+  // container since the last call (a fresh object even when the resulting
+  // markup looks identical — real DOM parses/allocates new nodes on every
+  // assignment), those references are now dangling: re-mount against the
+  // fresh element rather than patching detached nodes. Comparing by
+  // reference (rather than tracking "did render() just rewrite?") also
+  // covers first mount, where `stageMountEl` starts null.
+  function ensureStageMounted(): StageHandle | null {
+    const mountEl = app.querySelector<HTMLElement>('[data-stage-mount]')
+    if (!mountEl) return null
+    if (mountEl !== stageMountEl) {
+      stage = mountStage(mountEl, studio)
+      stageMountEl = mountEl
+    }
+    return stage
+  }
 
   function render(): void {
     const html = renderStudioHtml(studio, ui)
@@ -89,6 +119,13 @@ export function mountStudio(app: HTMLElement, studio: StudioRefs): StudioUi {
     const focusKey = focusedKey(app)
     app.innerHTML = html
     if (focusKey) restoreFocus(app, focusKey)
+    // The rewrite just destroyed whatever `.stage` container (and every
+    // sprite element mountStage was tracking) existed and replaced it with a
+    // fresh, empty placeholder — repaint it immediately so the viewport
+    // isn't blank until the next guest tick (which may never come while
+    // paused). patchStage() below covers the complementary case: a guest
+    // tick that reaches here without render() deciding a rewrite was needed.
+    ensureStageMounted()?.patch()
   }
 
   const ctx: PanelContext = { studio, ui, render }
@@ -147,7 +184,12 @@ export function mountStudio(app: HTMLElement, studio: StudioRefs): StudioUi {
   })
 
   render()
-  return { render }
+  return {
+    render,
+    patchStage() {
+      ensureStageMounted()?.patch()
+    },
+  }
 }
 
 // Generalized over every `[data-x]`-tagged input/textarea/select this module

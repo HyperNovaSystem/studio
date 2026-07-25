@@ -23,6 +23,86 @@ mid-gesture clicks can still be lost while the guest is *playing* (sprites move
 every tick). A keyed/targeted patch of just the `.stage` subtree would remove
 the remaining window.
 
+## 2026-07-25 — M8: keyed `.stage` patch closes the follow-up above
+
+Extracted the sprite subtree out of `renderStudioHtml`'s memoized string
+entirely. `renderStudioHtml` now renders `.stage` as a permanently empty
+`<div class="stage" data-stage-mount></div>` placeholder — no sprite markup
+ever appears in the string mountStudio's whole-app comparison is keyed on.
+`src/stage.ts`'s new `mountStage(stageHost, studio)` owns everything inside
+that placeholder via its own `Map<Entity, HTMLElement>`: `patch()` diffs the
+live guest world (`GuestSprite.visible` + `WorldTransform ?? GuestTransform`,
+same fallback and rationale as the entry below) against what it last
+painted, creating/removing elements only for entities that actually
+appeared/disappeared and otherwise updating just the changed `--x/--y/--r/
+--tint` custom properties or `sprite <kind>` class **on the same element
+instance** — an unchanged entity is never touched at all.
+
+`mountStudio` calls `stage.patch()` from two places, both required: (a)
+immediately after every real `app.innerHTML = html` rewrite, re-finding the
+fresh placeholder via `app.querySelector('[data-stage-mount]')` and
+re-mounting (the previous `mountStage` instance's element references are
+left dangling by the rewrite, same as any other DOM node) — otherwise the
+viewport would render blank until the next guest tick, which may never come
+while paused; (b) `patchStage()`, a second method on the object `mountStudio`
+returns, called by `main.ts` alongside `ui.render()` on every
+`guestWorld.signals.tickEnd`, independent of whether `render()`'s own
+memoized comparison decided a full rewrite was needed that frame. Pinned by
+`test/stage.test.ts` (zero DOM creates/removes patching an unchanged world;
+same element instance across a move; correct `data-entity` on spawn; removal
+on despawn/hidden/`visible:false`) and `test/ui.test.ts` (stage sprites
+repainted immediately after an outer rewrite, then still correctly populated
+after an immediately-following guest tick — the sequencing this milestone
+exists for).
+
+One incidental fix needed alongside this: `WorldTransform` had never been in
+`studio.ts`'s `RESERVED_GUEST_COMPONENT_TYPES` list, so it was only ever
+registered in the guest world's type registry as a side effect of whichever
+code happened to call `getComponent(id, WorldTransform)` first. Before this
+milestone that was always `renderStudioHtml`'s own (now-removed) inline
+sprite map, so it registered within the very first render, before that
+render's output was even compared. Moving the read into `mountStage`
+(called *after* that first render's html is captured) delayed the
+registration by one render cycle, which made `catalog.registeredTypes()`
+(and therefore the Entity Types panel's component checkbox list) differ on
+the *second* render of an otherwise fully idle studio — a spurious extra
+`app.innerHTML` write that `test/ui.test.ts`'s existing "30 idle renders → 1
+write" assertion caught immediately. Fixed by adding `WorldTransform` to
+`RESERVED_GUEST_COMPONENT_TYPES` so it is force-registered at construction
+like every other built-in, independent of any render-time side effect.
+
+**Evaluated `@domecs/dom` (`packages/domecs-dom` in `../domecs`) for this
+job and did not use it.** It is a well-fitted tool for a keyed
+entity→element view in general (`defineView` + `mountDOM`), but two concrete
+mismatches with this specific integration made a ~90-line hand-rolled
+patcher the better fit rather than "not invented here":
+
+1. **The container is re-created out from under it.** `mountDOM`'s `slots`
+   are DOM element references captured once at `mountDOM()`-call time, with
+   no API to rebind a live view to a new element — but `mountStudio`'s
+   memoized outer rewrite recreates the `.stage` placeholder itself
+   (deliberately: it's what the M8 patch above rebuilds sprites into). Using
+   `mountDOM` here would mean a full `teardown()` + `mountDOM()` cycle on
+   every outer rewrite just to rebind the slot, plus an explicit forced
+   repaint into the new container (see next point) — strictly more moving
+   parts than the plain `Map<Entity, HTMLElement>` this file already needed.
+2. **Forcing that repaint synchronously is a re-entrancy hazard.**
+   `mountDOM` paints during a world's own render phase, driven by
+   `world.step()`/`world.stepOnce()` — there is no caller-invoked "patch now"
+   entry point. The only way to force a repaint into a freshly re-mounted
+   slot without waiting for the next natural guest tick is a `dt<=0`
+   heartbeat step (`world.step(0)`), and per the engine's own documented F-6
+   semantics that heartbeat **still fires `tickEnd`** — i.e., calling it
+   from inside `mountStudio`'s own rewrite path would re-trigger
+   `main.ts`'s `guestWorld.signals.tickEnd` subscriber (`sync()` +
+   `ui.render()` + `ui.patchStage()`) reentrantly. This milestone's actual
+   contract — a plain, synchronous, caller-invoked `patch()` called from
+   exactly two known points — sidesteps that hazard entirely by construction.
+
+See `../domecs/doc/FINDINGS_studio.md` for the engine-side note on point 2
+(the heartbeat-fires-`tickEnd` interaction), which is a generic `@domecs/dom`
+integration hazard, not specific to Studio.
+
 ## 2026-07-25 — Entity Types panel can show stale component fields for a just-edited custom type
 
 M3's Entity Types panel (`src/panels/entityTypes.ts`) builds its component

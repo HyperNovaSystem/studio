@@ -138,6 +138,20 @@ const PANEL_ORDER: Array<{ panel: EditorPanelId; title: string }> = [
 // registered once a prefab was first instantiated). Force-registering them
 // up front via World.has() lets entityType/scene component references
 // resolve immediately, regardless of what's currently live in the world.
+//
+// WorldTransform is included here for a second reason too: it is otherwise
+// only registered in the guest world's type registry as an incidental side
+// effect of the first `getComponent(id, WorldTransform)` call anyone makes
+// (composeTransforms itself doesn't register it until the guest world's
+// first tick — see FINDINGS.md, "WorldTransform is unpopulated until the
+// guest world's first tick"). Before M8, that first call happened to live
+// inside renderStudioHtml's own stage markup, so it always ran (and so
+// registered WorldTransform) within the very first render. M8 moved that
+// read into mountStage's independently-timed patch() — without this entry,
+// WorldTransform would instead first appear in catalog.registeredTypes()
+// (and therefore the Entity Types panel's component checkbox list) one
+// render cycle later than every other built-in, changing renderStudioHtml's
+// memoized output on the *second* render of an otherwise fully idle studio.
 const RESERVED_GUEST_COMPONENT_TYPES: ComponentType<unknown>[] = [
   GuestName,
   GuestTransform,
@@ -147,6 +161,7 @@ const RESERVED_GUEST_COMPONENT_TYPES: ComponentType<unknown>[] = [
   GuestPrefabSource,
   GuestDebugProbe,
   GuestRenderable,
+  WorldTransform,
 ]
 
 // entityTypes reproducing the historical prop.crate / enemy.spark /
