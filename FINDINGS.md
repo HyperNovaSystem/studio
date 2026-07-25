@@ -70,3 +70,30 @@ Two deliberate semantic changes landed with the migration from the app-local
    on-demand changed-entity counts via the engine's `diffSnapshots` over
    adjacent `history.snapshots()` entries (`StudioRefs.timelineDiffs()`,
    compute-on-scrub only — `snapshots()` returns a defensive copy).
+
+## 2026-07-25 — WorldTransform is unpopulated until the guest world's first tick
+
+M5 wired `@domecs/scene`'s `composeTransforms(GuestTransform, WorldTransform,
+...)` onto `guestWorld` and switched the stage view (`src/ui.ts`) to render
+from `WorldTransform` — the composed, parent-aware value — instead of
+`GuestTransform`. `composeTransforms` registers its resolver as a
+`'tick'`-schedule system (see the linked engine finding), so a guest entity
+carries no `WorldTransform` at all until `guestWorld` has actually ticked at
+least once since that entity was spawned/restored. `createDomecsStudio()`
+never ticks the guest world on its own (only user-driven Step/Play do), so
+right after construction or a project Open/reload, every entity's
+`WorldTransform` is missing.
+
+Rendering nothing for that gap would be a real regression (today's demo
+scene — and any freshly loaded project — paints its sprites immediately, no
+tick required). Worked around in `src/ui.ts`'s stage rendering with a
+fallback: `getComponent(id, WorldTransform) ?? getComponent(id, GuestTransform)`.
+This is exactly correct for a root entity (composeTransforms' own `compose()`
+reduces to the local value when `parentWorld` is `null`, tick or not) and
+only briefly approximate for an already-parented entity (renders at its
+local offset, ignoring the parent's contribution, until the next tick
+self-heals it) — a narrower gap than "blank viewport," and one inherent to
+any tick-schedule-derived value. See
+`../domecs/doc/FINDINGS_studio.md` ("composeTransforms only populates
+`World_` on a tick — no way to prime it without advancing `world.time.tick`")
+for why this wasn't fixed by priming the world once at construction instead.
