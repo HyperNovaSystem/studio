@@ -41,10 +41,6 @@ export interface UiState {
   draggedGuestEntityId: number | null
   /** Guest entity id whose tree-row delete is pending a two-step confirm (it has children — see despawnTree's usage in tree.ts). */
   confirmDespawnEntity: number | null
-  /** Raw (possibly invalid) textarea text per system index, keyed while the parsed value has not yet validated. */
-  systemJsonDraft: Map<number, string>
-  /** Validation error message per system index, cleared once that system's JSON parses and applies. */
-  systemJsonError: Map<number, string>
   /** Problems returned by the most recently invoked mutating catalog/session call (upsert or reload); never hidden. */
   lastCatalogProblems: SchemaProblem[]
 }
@@ -59,8 +55,6 @@ export function createUiState(): UiState {
     spawnEntityType: '',
     draggedGuestEntityId: null,
     confirmDespawnEntity: null,
-    systemJsonDraft: new Map(),
-    systemJsonError: new Map(),
     lastCatalogProblems: [],
   }
 }

@@ -97,3 +97,29 @@ any tick-schedule-derived value. See
 `../domecs/doc/FINDINGS_studio.md` ("composeTransforms only populates
 `World_` on a tick — no way to prime it without advancing `world.time.tick`")
 for why this wasn't fixed by priming the world once at construction instead.
+
+## 2026-07-25 — Systems panel: no "create new system" affordance; reorder is per-action only
+
+M7 reworked the Systems panel (`src/panels/systems.ts`) from a raw-JSON
+textarea into a real form editor (name/schedule, query checkboxes over
+`catalog.registeredTypes()`, action rows with live `parseExpression`-backed
+syntax feedback on `when`/each action's `expr`, add/remove/reorder-by-row
+action controls) — but it only edits *existing* `doc.systems` entries. There
+is still no button to create a brand-new system from the UI (the original
+pre-M7 panel had none either — this is a pre-existing gap, not a regression,
+just still open); the only way to add one today is `session.mutate` /
+`projectSession.mutate` from code (or a hand-edited project file). Also,
+"reorder" is scoped to an action row within one system (up/down, swapping
+`actions[i]`/`actions[i±1]`) — there is no control to reorder the top-level
+system list itself. Both are believed to be small, additive follow-ups
+(mirror the Component/Entity Types panels' existing "add new X" form
+pattern for the former; a second pair of up/down buttons on the system-row
+header for the latter) rather than anything structurally blocked.
+
+See `../domecs/doc/FINDINGS_studio.md` ("`RuleError` has no field-level tag,
+so a per-field UI must re-derive attribution itself") for why this panel's
+inline `when`/action error messages come from a local `parseExpression` +
+hand-rolled `set`-shape check rather than from `compileRule`/
+`RulesHandle.update()` directly — those two are still the authoritative,
+aggregate source of truth, surfaced through the problems strip
+(`src/panels/problems.ts`).

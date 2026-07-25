@@ -123,7 +123,7 @@ interface Catalog { reload(): SchemaProblem[]; spawnFromType(typeName: string, x
 
 ### M7: Studio — systems editor
 
-**Files:** Systems panel rework in ui/panels; `src/catalog.ts` gains `applySystems()` calling `installRules`/`update` on the guest world after every systems mutation.
+**Files:** Systems panel rework in ui/panels; `src/catalog.ts` gains `resolveComponentType(name)`, a thin accessor over the map `reload()` already maintains (the resolver `installRules`/`compileRule` need). Built against the real M6 source, the rules-reapply wiring landed in `src/studio.ts` instead of a `catalog.applySystems()`: `createDomecsStudio` builds one `RulesHandle` via `installRules` and an `applyRules()` closure, and `StudioRefs.sync()` (already called by every catalog-touching panel handler via `syncAndRender`, plus every project New/Open/Save/SaveAs) now calls it too — one wiring point covers both catalog-driven reloads and direct systems-panel edits, without coupling `catalog.ts` (which has no notion of rules or the guest `RulesHandle`) to M6. Compile errors surface via `StudioRefs.ruleErrors()`, folded into the existing problems-strip surface (`src/panels/problems.ts`) rather than a new one.
 
 **Acceptance:** form editor (name, schedule, query checkboxes over `registeredTypes()`, action rows with field picker + expr input, live parse feedback, enable toggle, reorder); a rule edit visibly changes running guest behavior next tick; compile errors shown inline + problems strip, rule stays disabled; round-trip through project file; tests green.
 

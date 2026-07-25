@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createWorld } from '@domecs/core'
+import { createWorld, entry, type ComponentType } from '@domecs/core'
 import { Parent, setParent } from '@domecs/scene'
 import { createDomecsStudio } from '../src/studio.js'
 import { mountStudio, renderStudioHtml } from '../src/ui.js'
@@ -337,19 +337,29 @@ describe('entity types panel', () => {
 describe('systems panel', () => {
   function setup() {
     const studio = createDomecsStudio({ headless: true, ringCapacity: 8 })
+    studio.catalog.upsertComponentType({ name: 'Health', fields: [{ name: 'hp', kind: 'number', default: 10 }] })
     studio.projectSession.mutate((doc) => {
       doc.systems.push({ name: 'decay', schedule: 'tick', query: ['Health'], actions: [{ set: 'Health.hp', expr: 'Health.hp - 1' }] })
     })
+    studio.sync()
     const host = fakeHost()
-    mountStudio(host.element, studio)
-    return { studio, host }
+    const ui = mountStudio(host.element, studio)
+    return { studio, host, ui }
   }
 
-  it('lists systems with an enable toggle and a raw JSON textarea', () => {
+  function healthType(studio: ReturnType<typeof createDomecsStudio>): ComponentType<{ hp: number }> {
+    return studio.catalog.resolveComponentType('Health') as ComponentType<{ hp: number }>
+  }
+
+  it('renders a form: enable toggle, name, schedule, query checkboxes, and action rows (no raw JSON)', () => {
     const { host } = setup()
-    expect(host.html()).toContain('data-system-enabled="0"')
-    expect(host.html()).toContain('data-system-json="0"')
-    expect(host.html()).toContain('"name": "decay"')
+    const html = host.html()
+    expect(html).toContain('data-system-enabled="0"')
+    expect(html).toContain('data-system-name="0" value="decay"')
+    expect(html).toContain('data-system-query="0:Health"')
+    expect(html).toContain('data-action-set="0:0" value="Health.hp"')
+    expect(html).toContain('data-action-expr="0:0" value="Health.hp - 1"')
+    expect(html).not.toContain('data-system-json')
   })
 
   it('toggling enabled mutates the system in place, not via the catalog', () => {
@@ -358,34 +368,123 @@ describe('systems panel', () => {
     expect(studio.projectSession.doc.systems[0]!.enabled).toBe(false)
   })
 
-  it('valid JSON on change applies the mutation and clears any prior error', () => {
+  it('checking an unused query checkbox adds that component to the query', () => {
     const { studio, host } = setup()
-    const edited = JSON.stringify({ name: 'decay', schedule: 'fixed', query: ['Health'], actions: [{ set: 'Health.hp', expr: '0' }] })
+    studio.catalog.upsertComponentType({ name: 'Tag', fields: [{ name: 'label', kind: 'string' }] })
 
-    host.dispatch('change', { target: fakeElement({ data: { 'system-json': '0' }, value: edited }) })
+    host.dispatch('change', { target: fakeElement({ data: { 'system-query': '0:Tag' }, checked: true }) })
 
-    expect(studio.projectSession.doc.systems[0]!.schedule).toBe('fixed')
+    expect(studio.projectSession.doc.systems[0]!.query).toEqual(['Health', 'Tag'])
+  })
+
+  it('unchecking a query checkbox removes that component from the query', () => {
+    const { studio, host } = setup()
+    host.dispatch('change', { target: fakeElement({ data: { 'system-query': '0:Health' }, checked: false }) })
+    expect(studio.projectSession.doc.systems[0]!.query).toEqual([])
+  })
+
+  it('Add action appends a blank {set, expr} row; Remove action drops it', () => {
+    const { studio, host } = setup()
+
+    host.dispatch('click', { target: fakeElement({ data: { 'add-action': '0' } }) })
+    expect(studio.projectSession.doc.systems[0]!.actions).toHaveLength(2)
+    expect(studio.projectSession.doc.systems[0]!.actions[1]).toEqual({ set: '', expr: '' })
+    expect(host.html()).toContain('data-action-set="0:1"')
+
+    host.dispatch('click', { target: fakeElement({ data: { 'remove-action': '0:1' } }) })
+    expect(studio.projectSession.doc.systems[0]!.actions).toHaveLength(1)
+    expect(host.html()).not.toContain('data-action-set="0:1"')
+  })
+
+  it('a deliberately bad expression shows an inline error without crashing the render or losing other edits', () => {
+    const { studio, host } = setup()
+
+    host.dispatch('change', { target: fakeElement({ data: { 'action-expr': '0:0' }, value: 'Health.hp - ' }) })
+
+    // Never silently dropped: the raw (invalid) text is still saved.
+    expect(studio.projectSession.doc.systems[0]!.actions[0]!.expr).toBe('Health.hp - ')
+    expect(host.html()).toContain('field-error')
+    // The rest of the row/system is untouched.
+    expect(studio.projectSession.doc.systems[0]!.actions[0]!.set).toBe('Health.hp')
+    expect(studio.projectSession.doc.systems[0]!.name).toBe('decay')
+    expect(studio.projectSession.doc.systems[0]!.query).toEqual(['Health'])
+  })
+
+  it('an invalid "when" expression shows an inline error next to the when field', () => {
+    const { studio, host } = setup()
+
+    host.dispatch('change', { target: fakeElement({ data: { 'system-when': '0' }, value: '&&&' }) })
+
+    expect(studio.projectSession.doc.systems[0]!.when).toBe('&&&')
+    expect(host.html()).toContain('data-system-when-error="0"')
+  })
+
+  it('clearing the "when" field back to empty removes it (treated as "no condition", not an error)', () => {
+    const { studio, host } = setup()
+    host.dispatch('change', { target: fakeElement({ data: { 'system-when': '0' }, value: 'Health.hp > 0' }) })
+    expect(studio.projectSession.doc.systems[0]!.when).toBe('Health.hp > 0')
+
+    host.dispatch('change', { target: fakeElement({ data: { 'system-when': '0' }, value: '' }) })
+
+    expect(studio.projectSession.doc.systems[0]!.when).toBeUndefined()
+    expect(host.html()).not.toContain('data-system-when-error="0"')
+  })
+
+  it('a valid expr edit clears the previous error and takes effect on the guest world\'s next tick', () => {
+    const { studio, host } = setup()
+    const type = healthType(studio)
+    const id = studio.guestWorld.spawn([entry(type, { hp: 10 })])
+
+    // Break the rule: an invalid expr fails to compile, so it is not installed.
+    host.dispatch('change', { target: fakeElement({ data: { 'action-expr': '0:0' }, value: 'Health.hp - ' }) })
+    expect(host.html()).toContain('field-error')
+    studio.guestWorld.step(1 / 60)
+    expect(studio.guestWorld.getComponent(id, type)!.hp).toBe(10)
+
+    // Fix it with a valid expr that sets hp to a fixed, easily-distinguished value.
+    host.dispatch('change', { target: fakeElement({ data: { 'action-expr': '0:0' }, value: '42' }) })
     expect(host.html()).not.toContain('field-error')
+
+    studio.guestWorld.step(1 / 60)
+    expect(studio.guestWorld.getComponent(id, type)!.hp).toBe(42)
   })
 
-  it('invalid JSON on change shows an inline error and does not mutate the doc', () => {
-    const { studio, host } = setup()
-    const before = JSON.stringify(studio.projectSession.doc.systems[0])
+  it('reordering action rows (Up/Down) changes both display order and evaluation order', () => {
+    const { studio, host, ui } = setup()
+    const type = healthType(studio)
 
-    host.dispatch('change', { target: fakeElement({ data: { 'system-json': '0' }, value: '{ not json' }) })
+    studio.projectSession.mutate((doc) => {
+      doc.systems[0] = {
+        name: 'combo',
+        schedule: 'tick',
+        query: ['Health'],
+        actions: [
+          { set: 'Health.hp', expr: '100' },
+          { set: 'Health.hp', expr: 'Health.hp - 1' },
+        ],
+      }
+    })
+    studio.sync()
+    ui.render()
 
-    expect(JSON.stringify(studio.projectSession.doc.systems[0])).toBe(before)
-    expect(host.html()).toContain('field-error')
-  })
+    const html = host.html()
+    expect(html.indexOf('data-action-expr="0:0"')).toBeLessThan(html.indexOf('data-action-expr="0:1"'))
 
-  it('a JSON value that parses but fails the minimal shape check is also rejected, not applied', () => {
-    const { studio, host } = setup()
-    const before = JSON.stringify(studio.projectSession.doc.systems[0])
+    const id = studio.guestWorld.spawn([entry(type, { hp: 10 })])
+    studio.guestWorld.step(1 / 60)
+    // Evaluated in order: hp=100, then hp=100-1=99.
+    expect(studio.guestWorld.getComponent(id, type)!.hp).toBe(99)
 
-    host.dispatch('change', { target: fakeElement({ data: { 'system-json': '0' }, value: JSON.stringify({ name: 'decay' }) }) })
+    host.dispatch('click', { target: fakeElement({ data: { 'action-up': '0:1' } }) })
 
-    expect(JSON.stringify(studio.projectSession.doc.systems[0])).toBe(before)
-    expect(host.html()).toContain('field-error')
+    expect(studio.projectSession.doc.systems[0]!.actions[0]!.expr).toBe('Health.hp - 1')
+    expect(studio.projectSession.doc.systems[0]!.actions[1]!.expr).toBe('100')
+    const reorderedHtml = host.html()
+    expect(reorderedHtml.indexOf('data-action-expr="0:0" value="Health.hp - 1"')).toBeGreaterThanOrEqual(0)
+
+    studio.guestWorld.step(1 / 60)
+    // Evaluated in the new order: hp=hp-1 (from whatever it was), then hp=100 unconditionally.
+    expect(studio.guestWorld.getComponent(id, type)!.hp).toBe(100)
   })
 })
 

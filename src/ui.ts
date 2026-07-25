@@ -8,7 +8,7 @@ import { handleToolbarClick, renderToolbar } from './panels/toolbar.js'
 import { renderProblems } from './panels/problems.js'
 import { handleComponentTypesChange, handleComponentTypesClick, renderComponentTypesPanel } from './panels/componentTypes.js'
 import { handleEntityTypesChange, handleEntityTypesClick, renderEntityTypesPanel } from './panels/entityTypes.js'
-import { handleSystemsChange, renderSystemsPanel } from './panels/systems.js'
+import { handleSystemsChange, handleSystemsClick, renderSystemsPanel } from './panels/systems.js'
 import { handleTreeChange, handleTreeClick, handleTreeDragStart, handleTreeDrop, renderTreePanel } from './panels/tree.js'
 
 export interface StudioUi {
@@ -102,6 +102,7 @@ export function mountStudio(app: HTMLElement, studio: StudioRefs): StudioUi {
     handleToolbarClick(target, ctx)
     handleComponentTypesClick(target, ctx)
     handleEntityTypesClick(target, ctx)
+    handleSystemsClick(target, ctx)
     handleTreeClick(target, ctx)
     render()
   })
