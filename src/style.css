@@ -25,6 +25,7 @@ button, input { font: inherit; }
 .tree-row { width: 100%; display: flex; justify-content: space-between; padding: 7px 8px; margin: 3px 0; color: #e6ebff; background: transparent; border: 1px solid transparent; border-radius: 8px; text-align: left; cursor: pointer; }
 .tree-row:hover, .tree-row.selected { background: #26314a; border-color: #4a7cff; }
 .tree-row small { color: #92a0c7; }
+.viewport-palette { display: flex; gap: 6px; margin-bottom: 8px; }
 .stage { position: relative; min-height: 360px; overflow: hidden; border-radius: 10px; background: radial-gradient(circle at 50% 30%, #263b56, #111827 70%); }
 .sprite { position: absolute; left: 50%; top: 50%; width: 24px; height: 24px; border-radius: 7px; background: var(--tint); transform: translate(var(--x), var(--y)) rotate(var(--r)); box-shadow: 0 0 18px color-mix(in srgb, var(--tint), transparent 40%); }
 .sprite.hero { border-radius: 50%; width: 30px; height: 30px; }

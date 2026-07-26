@@ -203,3 +203,70 @@ hand-rolled `set`-shape check rather than from `compileRule`/
 `RulesHandle.update()` directly — those two are still the authoritative,
 aggregate source of truth, surfaced through the problems strip
 (`src/panels/problems.ts`).
+
+## 2026-07-25 — M9: `studio.select(null)` used to be un-actionable — every sync silently re-selected entities[0]
+
+`syncEditorProjection` (`src/studio.ts`) computed `selected` as
+`playback.selectedGuestEntity ?? snapshot.entities[0]?.id ?? null` and wrote
+that fallback value straight back into `PlaybackState.selectedGuestEntity`
+whenever the live field was `null` — on *every* sync, not just the first.
+Before M9 this was invisible: nothing ever called `studio.select(null)`, so
+the only time the field was `null` was immediately after construction, and
+the fallback's job was exactly "give the inspector something to show on
+first paint." M9's empty-stage-click deselect (`src/ui.ts`'s pointerdown
+handler) is the first caller of `select(null)` — and it silently did
+nothing observable, because the very next `syncEditorProjection` call
+(triggered by that same `select()`'s own `editorWorld.step()`) put
+`entities[0]` right back.
+
+Fixed by moving the "default to entities[0] when nothing has ever been
+selected" behavior out of the per-sync fallback and into a one-time step at
+the end of `createDomecsStudio`, run once before the first
+`syncEditorProjection` call. `syncEditorProjection` itself now just reads
+`playback.selectedGuestEntity` as-is — `null` is a legitimate, sticky "user
+explicitly deselected" state, not something to be silently overwritten.
+Pinned by `test/pointer.test.ts`'s "pointerdown on the empty stage
+background deselects" test. `select(id)` for a real id is unaffected;
+`grep`-checked that `PlaybackState.selectedGuestEntity` has no other writer
+than this one event system, so no other code path was relying on the old
+per-sync re-fallback.
+
+## 2026-07-25 — M9: no visual "selected" outline on the stage sprite itself
+
+`src/stage.ts`'s keyed patcher does not read `PlaybackState.selectedGuestEntity`
+at all, so a selected entity's sprite in the viewport looks identical to an
+unselected one — selection state is only visible via the tree row's
+`.selected` class and the inspector panel's contents, not in the viewport
+itself. Deliberately not added in M9: `test/stage.test.ts`'s "only touches
+the class when kind changes, leaving other sprites alone" test asserts an
+exact `className` (`'sprite enemy'`) for an entity that (per
+`syncEditorProjection`'s default-selection seeding, see the entry above) is
+the auto-selected entity at the point that test runs — adding a
+`selected`-conditional class suffix to `mountStage`'s `patch()` would change
+that assertion's expected string and require touching an M8 test to make an
+M9 addition pass, which felt like the wrong trade for a purely cosmetic gap.
+A real fix (e.g. a `.sprite.selected { outline: ...}` rule keyed off a
+`selected` boolean already tracked per-`SpriteState`, touched with the same
+"only write when changed" discipline the `kind`/`tint`/position fields
+already use) is straightforward follow-up work, just out of scope for this
+pass.
+
+## 2026-07-25 — M9: palette spawn is click-to-center, not drag-from-palette-onto-stage
+
+The spec (`docs/superpowers/specs/2026-07-25-studio-usefulness-design.md`,
+Phase 4) describes both "drag from palette onto stage instantiates at the
+drop point" and "plain click spawns at stage center" as the intended
+behavior. This app implements only the latter: a second "spawn from
+entityType" control (`renderViewportPalette` in `src/ui.ts`, distinct
+`data-viewport-spawn*` attributes so it doesn't collide with the tree
+panel's existing `data-spawn-from-type` control) that spawns at world
+`(0, 0)` — which is exactly the stage's geometric center, see
+`gesture.ts`'s `clientToWorld` doc comment, so no separate "center" constant
+was needed — and auto-selects the result. A real HTML5-drag-from-palette
+interaction (a `draggable` palette entry, `dragstart`/`dragover`/`drop`
+wired to the stage, converting the drop's client coordinates through
+`clientToWorld`) is a small enough addition on top of the coordinate math
+already built for sprite dragging that it is reasonable follow-up work, but
+was judged disproportionate effort for this milestone versus the value over
+the click affordance — the spec explicitly offers the click behavior as an
+acceptable simplification, and this app takes it.
