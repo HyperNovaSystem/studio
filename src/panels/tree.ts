@@ -16,7 +16,7 @@ type TreeRow = EntityView & {
  * types by name the way `catalog.spawnFromType` does. Returns null when the
  * source entity no longer exists (empty archetype).
  */
-function duplicateEntity(guestWorld: PanelContext['studio']['guestWorld'], id: Entity): Entity | null {
+export function duplicateEntity(guestWorld: PanelContext['studio']['guestWorld'], id: Entity): Entity | null {
   const types = guestWorld.archetype(id)
   if (types.length === 0) return null
   const entries = types.map((type) => {
@@ -77,6 +77,29 @@ export function renderTreePanel(ctx: PanelContext): string {
   `
 }
 
+/**
+ * Shared despawn-with-confirm decision, factored out so both the tree row's
+ * delete button (`handleTreeClick`, below) and the viewport's `Delete`/
+ * `Backspace` keydown (`src/ui.ts`) drive the exact same confirmation-state
+ * logic rather than two copies of it. A childless entity despawns
+ * immediately (`despawnTree` degenerates to a plain despawn for a leaf); one
+ * with children needs a two-step confirm first — the pending id is recorded
+ * in `ui.confirmDespawnEntity`, which the tree panel's row rendering already
+ * reads to show the "Confirm delete" / "Cancel" controls, so triggering this
+ * from the viewport surfaces the SAME confirm UI in the tree panel rather
+ * than inventing a second one.
+ */
+export function requestDespawn(id: Entity, ctx: PanelContext): void {
+  const { studio, ui } = ctx
+  if (childrenOf(studio.guestWorld, id).length > 0) {
+    ui.confirmDespawnEntity = id
+    ctx.render()
+  } else {
+    despawnTree(studio.guestWorld, id)
+    syncAndRender(ctx)
+  }
+}
+
 export function handleTreeClick(target: HTMLElement, ctx: PanelContext): void {
   const { studio, ui } = ctx
 
@@ -95,22 +118,14 @@ export function handleTreeClick(target: HTMLElement, ctx: PanelContext): void {
     return
   }
 
-  // A childless entity despawns immediately (despawnTree degenerates to a
-  // plain despawn for a leaf — see its doc comment). One with children needs
-  // a two-step confirm first, the same pattern componentTypes.ts's
-  // delete-with-usageCount uses: first click records which entity is
-  // pending and shows its child count; a second click on the resulting
-  // Confirm button is what actually calls despawnTree.
+  // First click records which entity is pending and shows its child count
+  // (if any); a second click on the resulting Confirm button is what
+  // actually calls despawnTree. See requestDespawn's doc comment — this is
+  // the same pattern componentTypes.ts's delete-with-usageCount uses, now
+  // shared with the viewport's Delete/Backspace keydown (src/ui.ts) too.
   const despawn = target.closest<HTMLElement>('[data-despawn]')
   if (despawn) {
-    const id = Number(despawn.dataset.despawn)
-    if (childrenOf(studio.guestWorld, id).length > 0) {
-      ui.confirmDespawnEntity = id
-      ctx.render()
-    } else {
-      despawnTree(studio.guestWorld, id)
-      syncAndRender(ctx)
-    }
+    requestDespawn(Number(despawn.dataset.despawn), ctx)
     return
   }
 
