@@ -445,6 +445,22 @@ export function createDomecsStudio(options: StudioOptions = {}): StudioRefs {
   }
 
   installEditorSystems(refs, resolveComponentType)
+  // One-time default selection: before this, `syncEditorProjection` used to
+  // re-apply "select entities[0] if selectedGuestEntity is null" on EVERY
+  // sync, which made an explicit `select(null)` (M9's empty-stage-click
+  // deselect) get silently overwritten back to entities[0] on the very next
+  // sync. Applying it exactly once, here, at construction — before any
+  // caller has had a chance to select or deselect anything — preserves the
+  // original "the app boots with something selected, so the inspector isn't
+  // empty" behavior without fighting a later explicit deselect.
+  const initialPlayback = editorWorld.getComponent(playbackId, PlaybackState)!
+  if (initialPlayback.selectedGuestEntity === null) {
+    const first = guestWorld.snapshot().entities[0]?.id ?? null
+    if (first !== null) {
+      initialPlayback.selectedGuestEntity = first
+      editorWorld.markChanged(playbackId, PlaybackState)
+    }
+  }
   syncEditorProjection(refs)
   return refs
 }
@@ -586,11 +602,14 @@ function syncEditorProjection(refs: StudioRefs): void {
 
   const playback = editorWorld.getComponent(refs.playbackId, PlaybackState)!
   const snapshot = guestWorld.snapshot()
-  const selected = playback.selectedGuestEntity ?? snapshot.entities[0]?.id ?? null
-  if (playback.selectedGuestEntity === null && selected !== null) {
-    playback.selectedGuestEntity = selected
-    editorWorld.markChanged(refs.playbackId, PlaybackState)
-  }
+  // No re-select-entities[0]-when-null fallback here (M9): `select()` is the
+  // ONLY writer of `selectedGuestEntity` besides `createDomecsStudio`'s own
+  // one-time initial default (below) — see FINDINGS.md — so a null here
+  // means either "not constructed yet" (never true when this function runs)
+  // or an explicit `studio.select(null)` (empty-stage-click deselect, M9's
+  // viewport). Silently re-selecting entities[0] on every sync would make
+  // deselection impossible to observe for longer than one sync.
+  const selected = playback.selectedGuestEntity
 
   for (const entity of snapshot.entities) {
     const name = guestWorld.getComponent(entity.id, GuestName)?.value ?? `Entity ${entity.id}`
